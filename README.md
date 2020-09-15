@@ -1,8 +1,8 @@
 # AzStorage.jl
 
 | **Documentation** | **Action Statuses** |
-|:---:|:---:|:---:|
-| [![][docs-dev-img]][docs-dev-url] [![][docs-stable-img]][docs-stable-url] | [![][doc-status-img]][doc-status-url] [![][codecov-img]][codecov-url] |
+|:---:|:---:|
+| [![][docs-dev-img]][docs-dev-url] [![][docs-stable-img]][docs-stable-url] | [![][doc-build-status-img]][doc-build-status-url] [![][build-status-img]][build-status-url] [![][code-coverage-img]][code-coverage-results] |
 
 
 Interface to Azure blob storage.
@@ -15,3 +15,9 @@ Interface to Azure blob storage.
 
 [doc-status-img]: https://github.com/ChevronETC/AzStorage.jl/workflows/Documentation/badge.svg
 [doc-status-url]: https://github.com/ChevronETC/AzStorage.jl/actions?query=workflow%3ADocumentation
+
+[build-status-img]: https://github.com/ChevronETC/AzStorage.jl/workflows/Tests/badge.svg
+[build-status-url]: https://github.com/ChevronETC/AzStorage.jl/actions?query=workflow%3A"Tests"
+
+[code-coverage-img]: https://codecov.io/gh/ChevronETC/AzStorage.jl/branch/master/graph/badge.svg
+[code-coverage-results]: https://codecov.io/gh/ChevronETC/AzStorage.jl
