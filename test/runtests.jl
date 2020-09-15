@@ -1,5 +1,9 @@
 using AbstractStorage, AzSessions, AzStorage, Dates, JSON, Random, Test
 
+
+open(joinpath(homedir(),"session.json"), "w") do f
+end
+
 session = AzSession(read(joinpath(homedir(),"session.json"), String))
 storageaccount = ENV["STORAGE_ACCOUNT"]
 @info "storageaccount=$storageaccount"
