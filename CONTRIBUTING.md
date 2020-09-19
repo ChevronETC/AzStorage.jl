@@ -8,9 +8,10 @@ which may already cover your suggestion.
 
 ## Contributing
 We try to follow GitHub flow (https://guides.github.com/introduction/flow/) for
-making changes to AzStorage.jl.  Contributors retain copyright on their
-contributions, and the MIT license (https://opensource.org/licenses/MIT)
-applies to the contribution.
+making changes to AzStorage.jl.
+
+Contributors retain copyright on their contributions, and the MIT license
+(https://opensource.org/licenses/MIT) applies to the contribution.
 
 The basic steps to making a contribution are as follows, and assume some knowledge of
 git:
