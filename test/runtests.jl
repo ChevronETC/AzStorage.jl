@@ -1,6 +1,10 @@
 using AbstractStorage, AzSessions, AzStorage, Dates, JSON, Random, Test
 
-session = AzSession(read(joinpath(homedir(),"session.json"), String))
+credentials = JSON.parse(ENV["AZURE_CREDENTIALS"])
+AzSessions.write_manifest(;client_id=credentials["clientId"], client_secret=credentials["clientSecret"], tenant=credentials["tenantId"])
+
+session = AzSession(;protocal=AzClientCredentials, client_id=credentials["clientId"], client_secret=credentials["clientSecret"], resource="https://storage.azure.com/")
+
 storageaccount = ENV["STORAGE_ACCOUNT"]
 @info "storageaccount=$storageaccount"
 
@@ -220,7 +224,7 @@ end
 
 @testset "Object, bytes" begin
     sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+13)))
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+14)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = open(c, "bar")
     x = rand(10)
@@ -232,7 +236,7 @@ end
 
 @testset "Object, bytes" begin
     sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+13)))
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+15)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = open(c, "bar")
     write(io, "hello")
@@ -243,7 +247,7 @@ end
 
 @testset "Object, isfile" begin
     sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+13)))
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+16)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = open(c, "bar")
     write(io, "hello")
@@ -253,7 +257,7 @@ end
 
 @testset "Object, rm" begin
     sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+13)))
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+17)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = open(c, "bar")
     write(io, "hello")
@@ -265,7 +269,7 @@ end
 
 @testset "Object, joinpath" begin
     sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+13)))
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+18)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = joinpath(c, "bar", "baz")
     write(io, "hello")
@@ -277,7 +281,7 @@ end
 # Anusha found the failing example.
 @testset "Anusha's example" begin
     sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+14)))
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+19)))
     c = AzContainer("foo-$r-l", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     mkpath(c)
     x = rand(2801,13821)
