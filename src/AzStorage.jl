@@ -174,7 +174,9 @@ function nblocks(nthreads::Integer, nbytes::Integer)
     nblocks
 end
 
-addprefix(c::AzContainer, o) = c.prefix == "" ? o : normpath("$(c.prefix)/$o")
+_normpath(s) = Sys.iswindows() ? replace(normpath(s), "\\"=>"/") : normpath(s)
+
+addprefix(c::AzContainer, o) = c.prefix == "" ? o : _normpath("$(c.prefix)/$o")
 
 function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; contenttype="application/octet-stream")
     function writebytes_blob(c, o, data, contenttype)
@@ -393,7 +395,7 @@ function Base.readdir(c::AzContainer; filterlist=true)
         blobs = xroot["Blobs"][1]["Blob"]
         _names = [content(blob["Name"][1]) for blob in blobs]
         if filterlist && c.prefix != ""
-            _names = replace.(filter(_name->startswith(_name, c.prefix), _names), normpath(c.prefix*"/")=>"")
+            _names = replace.(filter(_name->startswith(_name, c.prefix), _names), _normpath(c.prefix*"/")=>"")
         end
         names = [names; _names]
         marker = content(xroot["NextMarker"][1])
@@ -412,7 +414,7 @@ function Base.dirname(c::AzContainer)
     if c.prefix == ""
         nm = c.containername
     else
-        nm = normpath(c.containername * "/" * c.prefix)
+        nm = _normpath(c.containername * "/" * c.prefix)
     end
     nm
 end
