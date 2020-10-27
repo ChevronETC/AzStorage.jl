@@ -29,6 +29,27 @@ exponential_backoff(
     return nanosleep(&ts_sleeptime, &ts_remainingtime);
 }
 
+int N_HTTP_RETRY_CODES = 0;
+int N_CURL_RETRY_CODES = 0;
+long *HTTP_RETRY_CODES = NULL;
+long *CURL_RETRY_CODES = NULL;
+
+void
+curl_init(
+        int   n_http_retry_codes,
+        int   n_curl_retry_codes,
+        long *http_retry_codes,
+        long *curl_retry_codes)
+{
+    HTTP_RETRY_CODES = http_retry_codes;
+    N_HTTP_RETRY_CODES = n_http_retry_codes;
+
+    CURL_RETRY_CODES = curl_retry_codes;
+    N_CURL_RETRY_CODES = n_curl_retry_codes;
+
+    curl_global_init(CURL_GLOBAL_ALL);
+}
+
 struct ResponseCodes {
     long http;
     long curl;
@@ -42,19 +63,21 @@ int
 isrestretrycode(
         struct ResponseCodes responsecodes)
 {
-    if (responsecodes.curl == 7 || responsecodes.curl == 55 || responsecodes.curl == 56) {
-        return 1;
-    }
-    if (responsecodes.http == 500 || responsecodes.http == 503) {
-        return 1;
-    }
-    return 0;
-}
+    int i;
 
-void
-curl_init()
-{
-    curl_global_init(CURL_GLOBAL_ALL);
+    for (i = 0; i < N_HTTP_RETRY_CODES; i++) {
+        if (responsecodes.http == HTTP_RETRY_CODES[i]) {
+            return 1;
+        }
+    }
+
+    for (i = 0; i < N_CURL_RETRY_CODES; i++) {
+        if (responsecodes.curl == CURL_RETRY_CODES[i]) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 size_t
