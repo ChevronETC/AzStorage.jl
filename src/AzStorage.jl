@@ -1,6 +1,8 @@
 module AzStorage
 
-using AbstractStorage, AzSessions, AzStorage_jll, Base64, HTTP, LightXML, Serialization, Sockets
+using AbstractStorage, AzSessions#=, AzStorage_jll=#, Base64, HTTP, LightXML, Serialization, Sockets
+
+const libAzStorage = normpath(joinpath(Base.source_path(),"../libAzStorage"))
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
 const RETRYABLE_HTTP_ERRORS = [
@@ -10,6 +12,7 @@ const RETRYABLE_HTTP_ERRORS = [
 # https://curl.haxx.se/libcurl/c/libcurl-errors.html
 const RETRYABLE_CURL_ERRORS = [
     7,  # Failed to connect() to host or proxy.
+    28, # Connection timed out.
     55, # Failed sendingnetworkdata.
     56] # Failure with received network data.
 
