@@ -8,11 +8,23 @@ session = AzSession(;protocal=AzClientCredentials, client_id=credentials["client
 storageaccount = ENV["STORAGE_ACCOUNT"]
 @info "storageaccount=$storageaccount"
 
-for container in  containers(;storageaccount=storageaccount,session=session)
+for container in containers(;storageaccount=storageaccount,session=session)
     rm(AzContainer(container;storageaccount=storageaccount,session=session))
 end
 @info "sleeping for 60 seconds to ensure Azure clean-up from any previous run"
 sleep(60)
+
+@testset "Error codes" begin
+    @test unsafe_load(cglobal((:N_HTTP_RETRY_CODES, AzStorage.libAzStorage), Cint)) == 2
+    x = unsafe_load(cglobal((:HTTP_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
+    y = unsafe_wrap(Array, x, (2,); own=false)
+    @test y == [500,503]
+
+    @test unsafe_load(cglobal((:N_CURL_RETRY_CODES, AzStorage.libAzStorage), Cint)) == 3
+    x = unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
+    y = unsafe_wrap(Array, x, (3,); own=false)
+    @test y == [7,55,56]
+end
 
 @testset "Containers, list" begin
     sleep(1)

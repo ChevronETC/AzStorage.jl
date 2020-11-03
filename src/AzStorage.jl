@@ -2,8 +2,20 @@ module AzStorage
 
 using AbstractStorage, AzSessions, AzStorage_jll, Base64, HTTP, LightXML, Serialization, Sockets
 
+# https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
+const RETRYABLE_HTTP_ERRORS = [
+    500, # Internal server error
+    503] # Service unavailable
+
+# https://curl.haxx.se/libcurl/c/libcurl-errors.html
+const RETRYABLE_CURL_ERRORS = [
+    7,  # Failed to connect() to host or proxy.
+    55, # Failed sendingnetworkdata.
+    56] # Failure with received network data.
+
 function __init__()
-    ccall((:curl_init, libAzStorage), Cvoid, ())
+    ccall((:curl_init, libAzStorage), Cvoid, (Cint, Cint, Ptr{Clong}, Ptr{Clong}),
+        length(RETRYABLE_HTTP_ERRORS), length(RETRYABLE_CURL_ERRORS), RETRYABLE_HTTP_ERRORS, RETRYABLE_CURL_ERRORS)
 end
 
 mutable struct AzContainer{A<:AzSessionAbstract} <: Container
@@ -98,11 +110,6 @@ struct ResponseCodes
     http::Int64
     curl::Int64
 end
-
-# https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
-const RETRYABLE_HTTP_ERRORS = (
-    500, # Internal server error
-    503) # Service unavailable
 
 function isretryable(e::HTTP.StatusError)
     e.status ∈ RETRYABLE_HTTP_ERRORS && (return true)
