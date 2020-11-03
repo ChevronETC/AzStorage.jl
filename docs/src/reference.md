@@ -24,7 +24,9 @@ joinpath
 open
 read
 read!
+readdlm
 rm(::AzContainer, ::AbstractString)
 rm(::AzStorage.AzObject)
 write
+writedlm
 ```
