@@ -1,6 +1,6 @@
 module AzStorage
 
-using AbstractStorage, AzSessions, AzStorage_jll, Base64, HTTP, LightXML, Serialization, Sockets
+using AbstractStorage, AzSessions, AzStorage_jll, Base64, DelimitedFiles, HTTP, LightXML, Serialization, Sockets
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
 const RETRYABLE_HTTP_ERRORS = [
@@ -283,6 +283,62 @@ x = read!(io, zeros(10))
 ```
 """
 Base.write(o::AzObject, data) = write(o.container, o.name, data)
+
+"""
+    writedlm(container, "blobname")
+
+Write the array `data` to a delimited blob with the name `blobname` in container `container::AzContainer`
+"""
+function DelimitedFiles.writedlm(c::AzContainer, o::AbstractString, data::AbstractArray)
+    tfile = tempname()
+    DelimitedFiles.writedlm(tfile,data)
+    write(c,o,read(tfile))
+    rm(tfile)
+end
+
+"""
+    writedlm(io:AzObject, data)
+
+write the array `data` to `io::AzObject`
+
+# Example
+```
+io = open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "foo.txt")
+writedlm(io, rand(10,10))
+x = readdlm(io)
+```
+"""
+function DelimitedFiles.writedlm(o::AzObject, data::AbstractArray)
+     writedlm(o.container, o.name, data)
+end
+
+"""
+    readdlm(container, "blobname")
+
+Read the data in a delimited blob with the name `blobname` in container `container::AzContainer`
+"""
+function DelimitedFiles.readdlm(c::AzContainer, o::AbstractString)
+    tfile = tempname()
+    write(tfile, read(c, o, String))
+    data = DelimitedFiles.readdlm(tfile)
+    rm(tfile)
+    return data
+end
+
+"""
+    readdlm(io:AzObject)
+
+return the parsed delimited blob from the io object `io::AzObject`
+
+# Example
+```
+io = open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "foo.txt")
+data = readdlm(io)
+```
+"""
+function DelimitedFiles.readdlm(o::AzStorage.AzObject)
+    data = readdlm(o.container, o.name)
+end
 
 nthreads_effective(nthreads::Integer, nbytes::Integer) = clamp(div(nbytes, _MINBYTES_PER_BLOCK), 1, nthreads)
 
@@ -605,6 +661,6 @@ function Base.cp(src::AzContainer, dst::AzContainer)
     nothing
 end
 
-export AzContainer, containers
+export AzContainer, containers, readdlm, writedlm
 
 end
