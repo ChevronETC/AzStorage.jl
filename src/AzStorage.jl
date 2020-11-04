@@ -1,6 +1,6 @@
 module AzStorage
 
-using AbstractStorage, AzSessions, AzStorage_jll, Base64, HTTP, LightXML, Serialization, Sockets
+using AbstractStorage, AzSessions, AzStorage_jll, Base64, DelimitedFiles, HTTP, LightXML, Serialization, Sockets
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
 const RETRYABLE_HTTP_ERRORS = [
@@ -284,6 +284,65 @@ x = read!(io, zeros(10))
 ```
 """
 Base.write(o::AzObject, data) = write(o.container, o.name, data)
+
+"""
+    writedlm(container, "blobname", data, args...; options...)
+
+Write the array `data` to a delimited blob with the name `blobname` in container `container::AzContainer`
+"""
+function DelimitedFiles.writedlm(c::AzContainer, o::AbstractString, data::AbstractArray, args...; opts...)
+    io = IOBuffer(;write=true)
+    writedlm(io, data, args...; opts...)
+    write(c, o, String(take!(io)))
+end
+
+"""
+    writedlm(io:AzObject, data, args...; options...)
+
+write the array `data` to `io::AzObject`
+
+# Example
+```
+io = open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "foo.txt")
+writedlm(io, rand(10,10))
+x = readdlm(io)
+```
+"""
+function DelimitedFiles.writedlm(o::AzObject, data::AbstractArray, args...; opts...)
+     writedlm(o.container, o.name, data, args...; opts...)
+end
+
+"""
+    readdlm(container, "blobname", args...; options...)
+
+Read the data in a delimited blob with the name `blobname` in container `container::AzContainer`
+"""
+function DelimitedFiles.readdlm(c::AzContainer, o::AbstractString, args...; opts...)
+    io = IOBuffer(;write=true, read=true)
+    write(io, read(c, o, String))
+    seekstart(io)
+    readdlm(io, args...; opts...)
+end
+
+"""
+    readdlm(io:AzObject, args...; options...)
+
+return the parsed delimited blob from the io object `io::AzObject`
+
+# Example
+```
+io = open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "foo.txt")
+data = readdlm(io)
+```
+"""
+function DelimitedFiles.readdlm(o::AzObject, args...; opts...)
+    readdlm(o.container, o.name, args...; opts...)
+end
+
+#this is to resolve an function call ambiguity
+function DelimitedFiles.readdlm(o::AzObject, delim::AbstractChar, args...; opts...)
+    readdlm(o.container, o.name, delim, args...; opts...)
+end
 
 nthreads_effective(nthreads::Integer, nbytes::Integer) = clamp(div(nbytes, _MINBYTES_PER_BLOCK), 1, nthreads)
 
@@ -606,6 +665,6 @@ function Base.cp(src::AzContainer, dst::AzContainer)
     nothing
 end
 
-export AzContainer, containers
+export AzContainer, containers, readdlm, writedlm
 
 end

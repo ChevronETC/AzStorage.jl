@@ -302,3 +302,15 @@ end
     @test x ≈ _x
     rm(c)
 end
+
+@testset "writedlm and readdlm" begin
+    sleep(1)
+    a = rand(1000,1000)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+20)))
+    c = AzContainer("foo-$r-m", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    io = open(c, "bar")
+    writedlm(io,a)
+    _a = readdlm(io)
+    @test _a ≈ a
+    rm(c)
+end 
