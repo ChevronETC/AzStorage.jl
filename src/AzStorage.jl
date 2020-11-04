@@ -291,7 +291,7 @@ Write the array `data` to a delimited blob with the name `blobname` in container
 """
 function DelimitedFiles.writedlm(c::AzContainer, o::AbstractString, data::AbstractArray)
     io = IOBuffer(;write=true)
-    DelimitedFiles.writedlm(io,data)
+    writedlm(io, data)
     write(c,o,String(take!(io)))
 end
 
@@ -317,7 +317,7 @@ end
 Read the data in a delimited blob with the name `blobname` in container `container::AzContainer`
 """
 function DelimitedFiles.readdlm(c::AzContainer, o::AbstractString)
-    io = IOBuffer(;write=true,read=true)
+    io = IOBuffer(;write=true, read=true)
     write(io, read(c, o, String))
     seekstart(io)
     readdlm(io)
@@ -334,7 +334,7 @@ io = open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "foo.txt
 data = readdlm(io)
 ```
 """
-function DelimitedFiles.readdlm(o::AzStorage.AzObject)
+function DelimitedFiles.readdlm(o::AzObject)
     readdlm(o.container, o.name)
 end
 

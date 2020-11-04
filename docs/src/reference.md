@@ -13,9 +13,7 @@ dirname
 isdir
 mkpath
 readdir
-readdlm
 rm(::AzContainer)
-writedlm
 ```
 
 ## Blob methods
