@@ -285,18 +285,18 @@ x = read!(io, zeros(10))
 Base.write(o::AzObject, data) = write(o.container, o.name, data)
 
 """
-    writedlm(container, "blobname", data)
+    writedlm(container, "blobname", data, args...; options...)
 
 Write the array `data` to a delimited blob with the name `blobname` in container `container::AzContainer`
 """
-function DelimitedFiles.writedlm(c::AzContainer, o::AbstractString, data::AbstractArray)
+function DelimitedFiles.writedlm(c::AzContainer, o::AbstractString, data::AbstractArray, args...; opts...)
     io = IOBuffer(;write=true)
-    writedlm(io, data)
+    writedlm(io,data, args...; opts...)
     write(c,o,String(take!(io)))
 end
 
 """
-    writedlm(io:AzObject, data)
+    writedlm(io:AzObject, data, args...; options...)
 
 write the array `data` to `io::AzObject`
 
@@ -307,24 +307,24 @@ writedlm(io, rand(10,10))
 x = readdlm(io)
 ```
 """
-function DelimitedFiles.writedlm(o::AzObject, data::AbstractArray)
-     writedlm(o.container, o.name, data)
+function DelimitedFiles.writedlm(o::AzObject, data::AbstractArray, args...; opts...)
+     writedlm(o.container, o.name, data, args...; opts...)
 end
 
 """
-    readdlm(container, "blobname")
+    readdlm(container, "blobname", args...; options...)
 
 Read the data in a delimited blob with the name `blobname` in container `container::AzContainer`
 """
-function DelimitedFiles.readdlm(c::AzContainer, o::AbstractString)
-    io = IOBuffer(;write=true, read=true)
+function DelimitedFiles.readdlm(c::AzContainer, o::AbstractString, args...; opts...)
+    io = IOBuffer(;write=true,read=true)
     write(io, read(c, o, String))
     seekstart(io)
-    readdlm(io)
+    readdlm(io, args...; opts...)
 end
 
 """
-    readdlm(io:AzObject)
+    readdlm(io:AzObject, args...; options...)
 
 return the parsed delimited blob from the io object `io::AzObject`
 
@@ -334,8 +334,13 @@ io = open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "foo.txt
 data = readdlm(io)
 ```
 """
-function DelimitedFiles.readdlm(o::AzObject)
-    readdlm(o.container, o.name)
+function DelimitedFiles.readdlm(o::AzStorage.AzObject, args...; opts...)
+    readdlm(o.container, o.name, args...; opts...)
+end
+
+#this is to resolve an function call ambiguity
+function DelimitedFiles.readdlm(o::AzObject, delim::AbstractChar, args...; opts...)
+    readdlm(o.container, o.name, delim, args...; opts...)
 end
 
 nthreads_effective(nthreads::Integer, nbytes::Integer) = clamp(div(nbytes, _MINBYTES_PER_BLOCK), 1, nthreads)
