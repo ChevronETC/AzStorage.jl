@@ -285,15 +285,14 @@ x = read!(io, zeros(10))
 Base.write(o::AzObject, data) = write(o.container, o.name, data)
 
 """
-    writedlm(container, "blobname")
+    writedlm(container, "blobname", data)
 
 Write the array `data` to a delimited blob with the name `blobname` in container `container::AzContainer`
 """
 function DelimitedFiles.writedlm(c::AzContainer, o::AbstractString, data::AbstractArray)
-    tfile = tempname()
-    DelimitedFiles.writedlm(tfile,data)
-    write(c,o,read(tfile))
-    rm(tfile)
+    io = IOBuffer(;write=true)
+    DelimitedFiles.writedlm(io,data)
+    write(c,o,String(take!(io)))
 end
 
 """
@@ -318,11 +317,10 @@ end
 Read the data in a delimited blob with the name `blobname` in container `container::AzContainer`
 """
 function DelimitedFiles.readdlm(c::AzContainer, o::AbstractString)
-    tfile = tempname()
-    write(tfile, read(c, o, String))
-    data = DelimitedFiles.readdlm(tfile)
-    rm(tfile)
-    return data
+    io = IOBuffer(;write=true,read=true)
+    write(io, read(c, o, String))
+    seekstart(io)
+    readdlm(io)
 end
 
 """
@@ -337,7 +335,7 @@ data = readdlm(io)
 ```
 """
 function DelimitedFiles.readdlm(o::AzStorage.AzObject)
-    data = readdlm(o.container, o.name)
+    readdlm(o.container, o.name)
 end
 
 nthreads_effective(nthreads::Integer, nbytes::Integer) = clamp(div(nbytes, _MINBYTES_PER_BLOCK), 1, nthreads)
