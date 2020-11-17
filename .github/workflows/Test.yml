@@ -21,8 +21,8 @@ jobs:
         shell: bash
       - name: Run Az CLI script
         run: |
-          az group create -l southcentralus -n "azstorage-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}"
-          az storage account create -n "s${{ steps.uuid.outputs.uuid }}" -g "azstorage-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}" -l southcentralus
+          az group create -l southcentralus -n "AzureBackupRG-azstorage-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}"
+          az storage account create -n "s${{ steps.uuid.outputs.uuid }}" -g "AzureBackupRG-azstorage-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}" -l southcentralus
       - uses: julia-actions/julia-buildpkg@latest #change lastest to master
       - uses: julia-actions/julia-runtest@latest #change lastest to master
         env:
@@ -34,5 +34,5 @@ jobs:
           file: lcov.info
       - name: Run Az CLI script
         run: |
-          az group delete -n "azstorage-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}" --yes
+          az group delete -n "AzureBackupRG-azstorage-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}" --yes
         if: ${{ always() }}
