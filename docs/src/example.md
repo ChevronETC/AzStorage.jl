@@ -1,13 +1,13 @@
 # Example
 
-Here we show basic usage where we 1) create a container, 2) write a blob to the container, 3) list the contents of the container, 4) read the blob that was previously created, and 5) delete the container and its contents.
+Here we show basic usage where we 1) create a container, 2) write a blob to the container, 3) list the contents of the container, 4) read the blob that was previously created, 5) illustrate serialization, and 6) delete the container and its contents.
 
 ```julia
 using Pkg
 Pkg.add("AzSessions")
 Pkg.add("AzStorage")
 
-using AzSessions, AzStorage
+using AzSessions, AzStorage, Serialization
 
 # here we use client credentials, but auth-code-flow and device-code flow (etc.) are also available.
 # see the AzSessions.jl package for more details on authentication in Azure.
@@ -28,8 +28,15 @@ readdir(container)
 # read the contents of the blob
 x = read!(container, "myblob.bin", Vector{Float64}(undef, 10))
 
+# serialize and write structured data to the container.
+# here, we illustrate with a named tuple.
+serialize(container, "myblob.bin", (a=rand(10), b=rand(10)))
+
+# read and deserialze data from the container
+x = deserialize(container, "myblob.bin")
+
 # remove the container, and its contents
-rm(x)
+rm(container)
 ```
 
 In addition, we can represent blob's, providing an API that is similar to handling POSIX files.
@@ -46,8 +53,13 @@ write(io, rand(10))
 x = read!(io, zeros(10))
 
 # check that the blob exists
-isfile(x)
+isfile(io)
+
+# serialize and write structured data
+# here, we illustrate with a named tuple
+serialize(io, (a=rand(10),b=rand(10)))
+x = deserialize(io)
 
 # remove the blob
-rm(x)
+rm(io)
 ```

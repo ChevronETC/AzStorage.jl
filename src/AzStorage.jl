@@ -265,11 +265,7 @@ Write the array `data` to a blob with the name `blobname` in `container::AzConta
 Base.write(c::AzContainer, o::AbstractString, data::DenseArray{T}) where {T<:Number} =
     writebytes(c, o, unsafe_wrap(Vector{UInt8}, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false); contenttype="application/octet-stream")
 
-function Base.write(c::AzContainer, o::AbstractString, data::AbstractArray)
-    io = IOBuffer()
-    serialize(io, data)
-    writebytes(c, o, take!(io); contenttype="application/octet-stream")
-end
+Base.write(c::AzContainer, o::AbstractString, data::AbstractArray) = serialize(c, o, data)
 
 """
     write(io::AzObject, data)
@@ -284,6 +280,31 @@ x = read!(io, zeros(10))
 ```
 """
 Base.write(o::AzObject, data) = write(o.container, o.name, data)
+
+"""
+    serialize(container, "blobname", data)
+
+Serialize and write `data` to a blob with the name `blobname` in `container::AzContainer`.
+"""
+function Serialization.serialize(c::AzContainer, o::AbstractString, data)
+    io = IOBuffer(;write=true)
+    serialize(io, data)
+    writebytes(c, o, take!(io); contenttype="application/octet-stream")
+end
+
+"""
+    serialize(io::AzObject, data)
+
+Serialize and write data to `io::AzObject`.
+
+# Example
+```
+io = open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "foo.bin")
+serialize(io, (rand(10),rand(20)))
+a,b = deserialize(io)
+```
+"""
+Serialization.serialize(o::AzObject, data) = serialize(o.container, o.name, data)
 
 """
     writedlm(container, "blobname", data, args...; options...)
@@ -441,6 +462,32 @@ read!(io, Vector{Float64}(undef, 10))
 ```
 """
 Base.read!(o::AzObject, data; offset=0) = read!(o.container, o.name, data; offset=offset)
+
+"""
+    deserialize(container, "blobname")
+
+read and deserialize from a blob "blobname" in `container::AzContainer`.
+
+# Example
+```
+io = open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "foo.bin")
+serialize(io, (rand(10),rand(20)))
+a,b = deserialize(io)
+```
+"""
+function Serialization.deserialize(c::AzContainer, o::AbstractString)
+    io = IOBuffer(readbytes!(c, o, Vector{UInt8}(undef,filesize(c, o))); read=true)
+    deserialize(io)
+end
+
+"""
+    deserialize(object)
+
+read and deserialize a blob `object::AzObject`.
+
+# Example
+"""
+Serialization.deserialize(o::AzObject) = deserialize(o.container, o.name)
 
 """
     readdir(container)
