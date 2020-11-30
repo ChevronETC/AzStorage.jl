@@ -1,4 +1,4 @@
-using AbstractStorage, AzSessions, AzStorage, Dates, JSON, Random, Test
+using AbstractStorage, AzSessions, AzStorage, Dates, JSON, Random, Serialization, Test
 
 credentials = JSON.parse(ENV["AZURE_CREDENTIALS"])
 AzSessions.write_manifest(;client_id=credentials["clientId"], client_secret=credentials["clientSecret"], tenant=credentials["tenantId"])
@@ -234,9 +234,22 @@ end
     rm(c)
 end
 
-@testset "Object, bytes" begin
+@testset "Containers, serialization" begin
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+14)))
+    c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    mkpath(c)
+    x = (a=rand(10), b=rand(10))
+    serialize(c, "bar", x)
+    _x = deserialize(c, "bar")
+    @test x.a ≈ _x.a
+    @test x.b ≈ _x.b
+    rm(c)
+end
+
+@testset "Object, bytes" begin
+    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+15)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = open(c, "bar")
     x = rand(10)
@@ -248,7 +261,7 @@ end
 
 @testset "Object, bytes" begin
     sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+15)))
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+16)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = open(c, "bar")
     write(io, "hello")
@@ -259,7 +272,7 @@ end
 
 @testset "Object, isfile" begin
     sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+16)))
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+17)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = open(c, "bar")
     write(io, "hello")
@@ -269,7 +282,7 @@ end
 
 @testset "Object, rm" begin
     sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+17)))
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+18)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = open(c, "bar")
     write(io, "hello")
@@ -281,7 +294,7 @@ end
 
 @testset "Object, joinpath" begin
     sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+18)))
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+19)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = joinpath(c, "bar", "baz")
     write(io, "hello")
@@ -289,11 +302,23 @@ end
     rm(c)
 end
 
+@testset "Object, serialization" begin
+    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+20)))
+    c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    io = open(c, "bar")
+    x = (a=rand(10), b=rand(10))
+    serialize(io, x)
+    _x = deserialize(io)
+    @test x.a ≈ _x.a
+    @test x.b ≈ _x.b
+end
+
 # this failed because of a bug in the block-list when using exactly 10 blocks
 # Anusha found the failing example.
 @testset "Anusha's example" begin
     sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+19)))
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+21)))
     c = AzContainer("foo-$r-l", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     mkpath(c)
     x = rand(2801,13821)
@@ -306,7 +331,7 @@ end
 @testset "writedlm and readdlm" begin
     sleep(1)
     a = rand(1000,1000)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+20)))
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+22)))
     c = AzContainer("foo-$r-m", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = open(c, "bar")
     writedlm(io,a)

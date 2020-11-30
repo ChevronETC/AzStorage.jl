@@ -18,6 +18,7 @@ rm(::AzContainer)
 
 ## Blob methods
 ```@docs
+deserialize
 filesize
 isfile
 joinpath
@@ -27,6 +28,7 @@ read!
 readdlm
 rm(::AzContainer, ::AbstractString)
 rm(::AzStorage.AzObject)
+serialize
 write
 writedlm
 ```
