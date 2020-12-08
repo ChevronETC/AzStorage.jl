@@ -262,10 +262,15 @@ Base.write(c::AzContainer, o::AbstractString, data::AbstractString; contenttype=
 
 Write the array `data` to a blob with the name `blobname` in `container::AzContainer`.
 """
-Base.write(c::AzContainer, o::AbstractString, data::DenseArray{T}) where {T<:Number} =
-    writebytes(c, o, unsafe_wrap(Vector{UInt8}, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false); contenttype="application/octet-stream")
+function Base.write(c::AzContainer, o::AbstractString, data::DenseArray{T}) where {T}
+    if isbitstype(T)
+        writebytes(c, o, unsafe_wrap(Vector{UInt8}, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false); contenttype="application/octet-stream")
+    else
+        error("write is not supported on non-isbits arrays")
+    end
+end
 
-Base.write(c::AzContainer, o::AbstractString, data::AbstractArray) = serialize(c, o, data)
+Base.write(c::AzContainer, o::AbstractString, data) = error("AzStorage: `write` is only suppoted for DenseArray.")
 
 """
     write(io::AzObject, data)
@@ -419,20 +424,14 @@ method returns `data`.  For example,
 data = read!(AzContainer("foo";storageaccount="bar"), "baz.bin", Vector{Float32}(undef,10))
 ```
 """
-function Base.read!(c::AzContainer, o::AbstractString, data::DenseArray{T}; offset=0) where {T<:Number}
-    _data = unsafe_wrap(Array, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false)
-    readbytes!(c, o, _data; offset=offset*sizeof(T))
+function Base.read!(c::AzContainer, o::AbstractString, data::DenseArray{T}; offset=0) where {T}
+    if isbitstype(T)
+        _data = unsafe_wrap(Array, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false)
+        readbytes!(c, o, _data; offset=offset*sizeof(T))
+    else
+        error("AzStorage does not support reading objects of type $T.")
+    end
     data
-end
-
-"""
-    data = read(container, "blobname")
-
-read from a blob "blobname" in `container::AzContainer` into new memory.
-"""
-function Base.read(c::AzContainer, o::String)
-    io = IOBuffer(readbytes!(c, o, Array{UInt8}(undef, filesize(c, o))))
-    deserialize(io)
 end
 
 """
