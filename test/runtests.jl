@@ -339,3 +339,30 @@ end
     @test _a ≈ a
     rm(c)
 end 
+
+@testset "Containers, bytes, SubArray" begin
+    sleep(1)
+    a = rand(10,20,3)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+23)))
+    c = AzContainer("foo-$r-n", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    mkpath(c)
+    for i = 1:3
+        write(c, "bar$i", @view a[:,:,i])
+    end
+    _a = zeros(10,20,3)
+    for i = 1:3
+        read!(c, "bar$i", @view _a[:,:,i])
+    end
+    @test a ≈ _a
+    rm(c)
+end
+
+@testset "Containers, bytes, non-contiguous throws" begin
+    sleep(1)
+    a = rand(10,20)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+24)))
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    mkpath(c)
+    @test_throws ErrorException write(c, "bar", @view a[1:2:end,1:2:end])
+    rm(c)
+end

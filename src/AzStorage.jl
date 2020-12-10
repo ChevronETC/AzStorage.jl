@@ -257,16 +257,20 @@ For example: `content-type="text/plain", `content-type="applicaton/json", etc..
 Base.write(c::AzContainer, o::AbstractString, data::AbstractString; contenttype="text/plain") =
     writebytes(c, o, transcode(UInt8, data); contenttype=contenttype)
 
+_iscontiguous(data::DenseArray) = isbitstype(eltype(data))
+_iscontiguous(data::SubArray) = isbitstype(eltype(data)) && Base.iscontiguous(data)
+_iscontiguous(data::AbstractArray) = false
+
 """
-    write(container, "blobname", data::DenseArray)
+    write(container, "blobname", data::StridedArray)
 
 Write the array `data` to a blob with the name `blobname` in `container::AzContainer`.
 """
-function Base.write(c::AzContainer, o::AbstractString, data::DenseArray{T}) where {T}
-    if isbitstype(T)
+function Base.write(c::AzContainer, o::AbstractString, data::AbstractArray{T}) where {T}
+    if _iscontiguous(data)
         writebytes(c, o, unsafe_wrap(Vector{UInt8}, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false); contenttype="application/octet-stream")
     else
-        error("write is not supported on non-isbits arrays")
+        error("AzStorage: `write` is not supported on non-isbits arrays and/or non-contiguous arrays")
     end
 end
 
@@ -424,12 +428,12 @@ method returns `data`.  For example,
 data = read!(AzContainer("foo";storageaccount="bar"), "baz.bin", Vector{Float32}(undef,10))
 ```
 """
-function Base.read!(c::AzContainer, o::AbstractString, data::DenseArray{T}; offset=0) where {T}
-    if isbitstype(T)
+function Base.read!(c::AzContainer, o::AbstractString, data::AbstractArray{T}; offset=0) where {T}
+    if _iscontiguous(data)
         _data = unsafe_wrap(Array, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false)
         readbytes!(c, o, _data; offset=offset*sizeof(T))
     else
-        error("AzStorage does not support reading objects of type $T.")
+        error("AzStorage does not support reading objects of type $T and/or into a non-contiguous array.")
     end
     data
 end
