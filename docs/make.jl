@@ -1,4 +1,4 @@
-using Documenter, AzStorage
+using Documenter, AzStorage, Serialization
 
 makedocs(sitename="AzStorage", modules=[AzStorage])
 

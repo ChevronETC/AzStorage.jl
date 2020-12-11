@@ -294,6 +294,14 @@ Base.write(o::AzObject, data) = write(o.container, o.name, data)
     serialize(container, "blobname", data)
 
 Serialize and write `data` to a blob with the name `blobname` in `container::AzContainer`.
+
+
+# Example
+```
+container = AzContainer("mycontainer";storageaccount="mystorageaccount")
+serialize(container, "foo.bin", (rand(10),rand(20)))
+a,b = deserialize(io)
+```
 """
 function Serialization.serialize(c::AzContainer, o::AbstractString, data)
     io = IOBuffer(;write=true)
@@ -304,14 +312,7 @@ end
 """
     serialize(io::AzObject, data)
 
-Serialize and write data to `io::AzObject`.
-
-# Example
-```
-io = open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "foo.bin")
-serialize(io, (rand(10),rand(20)))
-a,b = deserialize(io)
-```
+Serialize and write data to `io::AzObject`.  See serialize(conainer, blobname, data).
 """
 Serialization.serialize(o::AzObject, data) = serialize(o.container, o.name, data)
 
@@ -486,9 +487,7 @@ end
 """
     deserialize(object)
 
-read and deserialize a blob `object::AzObject`.
-
-# Example
+read and deserialize a blob `object::AzObject`.  See `deserialize(container, "blobname")`.
 """
 Serialization.deserialize(o::AzObject) = deserialize(o.container, o.name)
 
