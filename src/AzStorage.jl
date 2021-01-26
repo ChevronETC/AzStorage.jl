@@ -379,7 +379,7 @@ nthreads_effective(nthreads::Integer, nbytes::Integer) = clamp(div(nbytes, _MINB
 
 function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; offset=0)
     function readbytes_serial!(c, o, data, offset)
-        HTTP.open(
+        @retry c.nretry HTTP.open(
                 "GET",
                 "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
                 Dict(
