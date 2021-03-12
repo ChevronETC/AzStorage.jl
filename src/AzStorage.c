@@ -6,7 +6,7 @@
 #include <string.h>
 #include <time.h>
 
-#define BUFFER_SIZE 2048
+#define BUFFER_SIZE 16000 // this needs to be large to accomodate large OAuth2 tokens
 #define MAXIMUM_BACKOFF 256.0
 #define CURLE_TIMEOUT 600L /* 5 hours */
 
