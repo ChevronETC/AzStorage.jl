@@ -366,3 +366,14 @@ end
     @test_throws ErrorException write(c, "bar", @view a[1:2:end,1:2:end])
     rm(c)
 end
+
+@testset "Container, minimal dictionary" begin
+    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+25)))
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    _c = minimaldict(c)
+    @test _c["storageaccount"] == storageaccount
+    @test _c["containername"] == "foo-$r-o"
+    @test _c["prefix"] == ""
+    @test length(_c) == 3
+end

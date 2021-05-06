@@ -104,8 +104,16 @@ function AzContainer(containername::AbstractString; storageaccount, session=AzSe
     AzContainer(String(storageaccount), String(_containername), String(prefix), session, nthreads, nretry, verbose)
 end
 
-AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSession(;lazy=true, scope=__OAUTH_SCOPE)) =
-    AzContainer(d["storageaccount"], d["containername"], d["prefix"], session, d["nthreads"], d["nretry"], d["verbose"])
+function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSession(;lazy=true, scope=__OAUTH_SCOPE); nthreads = Sys.CPU_THREADS, nretry=10, verbose=0)
+    AzContainer(
+        d["storageaccount"],
+        d["containername"],
+        d["prefix"],
+        session,
+        get(d, "nthreads", nthreads),
+        get(d, "nretry", nretry),
+        get(d, "verbose", verbose))
+end
 
 struct ResponseCodes
     http::Int64
@@ -547,6 +555,8 @@ function AbstractStorage.scrubsession(c::AzContainer)
     scrub!(_c.session)
     _c
 end
+
+AbstractStorage.minimaldict(c::AzContainer) = Dict("storageaccount"=>c.storageaccount, "containername"=>c.containername, "prefix"=>c.prefix)
 
 """
     isfile(container, "blobname")
