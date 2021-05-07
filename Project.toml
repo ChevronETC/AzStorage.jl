@@ -14,7 +14,7 @@ Serialization = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 
 [compat]
-AbstractStorage = "1"
+AbstractStorage = "^1.1"
 AzSessions = "1"
 AzStorage_jll = "0.2"
 HTTP = "0.8, 0.9"
