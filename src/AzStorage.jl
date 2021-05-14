@@ -14,9 +14,12 @@ const RETRYABLE_CURL_ERRORS = [
     55, # Failed sendingnetworkdata.
     56] # Failure with received network data.
 
+# https://docs.microsoft.com/en-us/rest/api/storageservices/versioning-for-the-azure-storage-services
+const API_VERSION = "2020-04-08"
+
 function __init__()
-    ccall((:curl_init, libAzStorage), Cvoid, (Cint, Cint, Ptr{Clong}, Ptr{Clong}),
-        length(RETRYABLE_HTTP_ERRORS), length(RETRYABLE_CURL_ERRORS), RETRYABLE_HTTP_ERRORS, RETRYABLE_CURL_ERRORS)
+    ccall((:curl_init, libAzStorage), Cvoid, (Cint, Cint, Ptr{Clong}, Ptr{Clong}, Cstring),
+        length(RETRYABLE_HTTP_ERRORS), length(RETRYABLE_CURL_ERRORS), RETRYABLE_HTTP_ERRORS, RETRYABLE_CURL_ERRORS, API_VERSION)
 end
 
 mutable struct AzContainer{A<:AzSessionAbstract} <: Container
@@ -165,16 +168,16 @@ function Base.mkpath(c::AzContainer)
             "PUT",
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)?restype=container",
             Dict(
-                "Authorization"=>"Bearer $(token(c.session))",
-                "x-ms-version"=>"2017-11-09"),
+                "Authorization" => "Bearer $(token(c.session))",
+                "x-ms-version" => API_VERSION),
             retry = false)
     end
     nothing
 end
 
 const _MINBYTES_PER_BLOCK = 32_000_000
-const _MAXBYTES_PER_BLOCK = 100_000_000
-const _MAXBLOCKS_PER_BLOB = 50_000
+const _MAXBYTES_PER_BLOCK = 400_000_000
+const _MAXBLOCKS_PER_BLOB = 500_000
 
 nblocks_error1() = error("data is too large for a block-blob: too many blocks")
 nblocks_error2() = error("data is too large for a block-block: too many bytes per block")
@@ -201,7 +204,7 @@ function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
             Dict(
                 "Authorization" => "Bearer $(token(c.session))",
-                "x-ms-version" => "2017-11-09",
+                "x-ms-version" => API_VERSION,
                 "Content-Length" => "$(length(data))",
                 "Content-Type" => contenttype,
                 "x-ms-blob-type" => "BlockBlob"),
@@ -223,7 +226,7 @@ function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
             "PUT",
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=blocklist",
             Dict(
-                "x-ms-version" => "2017-11-09",
+                "x-ms-version" => API_VERSION,
                 "Authorization" => "Bearer $(token(c.session))",
                 "Content-Type" => "application/octet-stream",
                 "Content-Length" => "$(length(blocklist))"),
@@ -392,7 +395,7 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
                 "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
                 Dict(
                     "Authorization" => "Bearer $(token(c.session))",
-                    "x-ms-version" => "2017-11-09",
+                    "x-ms-version" => API_VERSION,
                     "Range" => "bytes=$offset-$(offset+length(data)-1)"),
                     retry = false,
                     verbose = c.verbose) do io
@@ -513,7 +516,7 @@ function Base.readdir(c::AzContainer; filterlist=true)
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)?restype=container&comp=list&marker=$marker",
             Dict(
                 "Authorization" => "Bearer $(token(c.session))",
-                "x-ms-version" => "2017-11-09"),
+                "x-ms-version" => API_VERSION),
             retry = false)
         xroot = root(parse_string(String(r.body)))
         blobs = xroot["Blobs"][1]["Blob"]
@@ -603,7 +606,7 @@ function containers(;storageaccount, session=AzSession(;lazy=true, scope=__OAUTH
             "https://$storageaccount.blob.core.windows.net/?comp=list&marker=$marker",
             Dict(
                 "Authorization" => "Bearer $(token(session))",
-                "x-ms-version" => "2017-11-09"),
+                "x-ms-version" => API_VERSION),
             retry = false)
         xroot = root(parse_string(String(r.body)))
         containers = xroot["Containers"][1]["Container"]
@@ -625,7 +628,7 @@ function Base.filesize(c::AzContainer, o::AbstractString)
         "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
         Dict(
             "Authorization" => "Bearer $(token(c.session))",
-            "x-ms-version" => "2017-11-09"),
+            "x-ms-version" => API_VERSION),
         retry = false)
     n = 0
     for header in r.headers
@@ -655,7 +658,7 @@ function Base.rm(c::AzContainer, o::AbstractString)
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
             Dict(
                 "Authorization" => "Bearer $(token(c.session))",
-                "x-ms-version" => "2017-11-09"),
+                "x-ms-version" => API_VERSION),
             retry = false)
     catch
         @warn "error removing $(c.containername)/$(addprefix(c,o))"
@@ -682,7 +685,7 @@ function Base.rm(c::AzContainer)
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)?restype=container",
             Dict(
                 "Authorization" => "Bearer $(token(c.session))",
-                "x-ms-version" => "2017-11-09"),
+                "x-ms-version" => API_VERSION),
             retry = false)
     end
 
@@ -717,7 +720,7 @@ function Base.cp(src::AzContainer, dst::AzContainer)
             "https://$(dst.storageaccount).blob.core.windows.net/$(dst.containername)/$(addprefix(dst,blob))",
             Dict(
                 "Authorization" => "Bearer $(token(dst.session))",
-                "x-ms-version" => "2017-11-09",
+                "x-ms-version" => API_VERSION,
                 "x-ms-copy-source" => "https://$(src.storageaccount).blob.core.windows.net/$(src.containername)/$(addprefix(src,blob))"),
             retry = false)
     end

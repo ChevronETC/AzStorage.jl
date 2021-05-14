@@ -7,6 +7,7 @@
 #include <time.h>
 
 #define BUFFER_SIZE 16000 // this needs to be large to accomodate large OAuth2 tokens
+#define API_HEADER_BUFFER_SIZE 512
 #define MAXIMUM_BACKOFF 256.0
 #define CURLE_TIMEOUT 600L /* 5 hours */
 
@@ -33,19 +34,23 @@ int N_HTTP_RETRY_CODES = 0;
 int N_CURL_RETRY_CODES = 0;
 long *HTTP_RETRY_CODES = NULL;
 long *CURL_RETRY_CODES = NULL;
+char API_HEADER[API_HEADER_BUFFER_SIZE];
 
 void
 curl_init(
         int   n_http_retry_codes,
         int   n_curl_retry_codes,
         long *http_retry_codes,
-        long *curl_retry_codes)
+        long *curl_retry_codes,
+        char *api_version)
 {
     HTTP_RETRY_CODES = http_retry_codes;
     N_HTTP_RETRY_CODES = n_http_retry_codes;
 
     CURL_RETRY_CODES = curl_retry_codes;
     N_CURL_RETRY_CODES = n_curl_retry_codes;
+
+    snprintf(API_HEADER, API_HEADER_BUFFER_SIZE, "x-ms-version: %s", api_version);
 
     curl_global_init(CURL_GLOBAL_ALL);
 }
@@ -157,7 +162,7 @@ curl_writebytes_block(
     curl_contentlength(datasize, contentlength);
 
     struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, "x-ms-version: 2017-11-09");
+    headers = curl_slist_append(headers, API_HEADER);
     headers = curl_slist_append(headers, "Content-Type: application/octet-stream");
     headers = curl_slist_append(headers, contentlength);
     headers = curl_slist_append(headers, authorization);
@@ -310,7 +315,7 @@ curl_readbytes(
 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, authorization);
-    headers = curl_slist_append(headers, "x-ms-version: 2017-11-09");
+    headers = curl_slist_append(headers, API_HEADER);
     headers = curl_slist_append(headers, byterange);
 
     struct DataStruct datastruct;
