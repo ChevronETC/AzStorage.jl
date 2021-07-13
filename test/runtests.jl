@@ -314,6 +314,15 @@ end
     @test x.b ≈ _x.b
 end
 
+@testset "Object, number of blocks calculation" begin
+    nthreads = 16
+    @test AzStorage.nblocks(nthreads, nthreads*AzStorage._MAXBYTES_PER_BLOCK) == nthreads
+    @test AzStorage.nblocks(nthreads, nthreads*AzStorage._MINBYTES_PER_BLOCK) == nthreads
+    @test AzStorage.nblocks(nthreads, div(nthreads*AzStorage._MINBYTES_PER_BLOCK,2)) == div(nthreads, 2)
+    @test AzStorage.nblocks(nthreads, 2*nthreads*AzStorage._MAXBYTES_PER_BLOCK) == 2*nthreads
+    @test_throws ErrorException AzStorage.nblocks(nthreads, 2*AzStorage._MAXBYTES_PER_BLOCK*AzStorage._MAXBLOCKS_PER_BLOB)
+end
+
 # this failed because of a bug in the block-list when using exactly 10 blocks
 # Anusha found the failing example.
 @testset "Anusha's example" begin

@@ -179,17 +179,13 @@ const _MINBYTES_PER_BLOCK = 32_000_000
 const _MAXBYTES_PER_BLOCK = 400_000_000
 const _MAXBLOCKS_PER_BLOB = 500_000
 
-nblocks_error1() = error("data is too large for a block-blob: too many blocks")
-nblocks_error2() = error("data is too large for a block-block: too many bytes per block")
+nblocks_error() = error("data is too large for a block-blob")
 function nblocks(nthreads::Integer, nbytes::Integer)
     nblocks = ceil(Int, nbytes/_MAXBYTES_PER_BLOCK + eps(Float64))
     if nblocks < nthreads
-        bytes_per_block = max(div(nblocks, nthreads), _MINBYTES_PER_BLOCK)
-        nblocks = max(1, ceil(Int, nbytes/bytes_per_block))
+        nblocks = clamp(ceil(Int, nbytes/_MINBYTES_PER_BLOCK + eps(Float64)), 1, nthreads)
     end
-    nblocks > _MAXBLOCKS_PER_BLOB && nblocks_error1()
-    bytes_per_block = div(nbytes, nblocks) + (rem(nbytes, nblocks) == 0 ? 0 : 1)
-    bytes_per_block > _MAXBYTES_PER_BLOCK && nblocks_error2()
+    nblocks > _MAXBLOCKS_PER_BLOB && nblocks_error()
     nblocks
 end
 
