@@ -26,6 +26,16 @@ sleep(60)
     @test y == [7,28,55,56]
 end
 
+@testset "Containers, equivalent" begin
+    x = AzContainer("foo/bar"; storageaccount="baz", nthreads=10)
+    y = AzContainer("foo/bar"; storageaccount="baz", nthreads=11)
+    z = AzContainer("foo/bar"; storageaccount="fiz", nthreads=11)
+    w = AzContainer("foo/fiz"; storageaccount="baz", nthreads=11)
+    @test x == y
+    @test x != z
+    @test x != w
+end
+
 @testset "Containers, list" begin
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+0)))

@@ -118,6 +118,8 @@ function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSes
         get(d, "verbose", verbose))
 end
 
+Base.:(==)(x::AzContainer, y::AzContainer) = x.storageaccount == y.storageaccount && x.containername == y.containername && x.prefix == y.prefix
+
 struct ResponseCodes
     http::Int64
     curl::Int64
