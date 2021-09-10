@@ -177,9 +177,10 @@ function Base.mkpath(c::AzContainer)
     nothing
 end
 
-const _MINBYTES_PER_BLOCK = 32_000_000
-const _MAXBYTES_PER_BLOCK = 400_000_000
-const _MAXBLOCKS_PER_BLOB = 500_000
+# 4000 MiB, there are 2^20 bytes in one MiB
+const _MINBYTES_PER_BLOCK = 32 * 2^20
+const _MAXBYTES_PER_BLOCK = 4_000 * 2^20
+const _MAXBLOCKS_PER_BLOB = 50_000
 
 nblocks_error() = error("data is too large for a block-blob")
 function nblocks(nthreads::Integer, nbytes::Integer)
