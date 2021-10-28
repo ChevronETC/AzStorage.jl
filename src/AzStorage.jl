@@ -84,6 +84,13 @@ Base.close(object::AzObject) = nothing
 
 const __OAUTH_SCOPE = "offline_access+openid+https://storage.azure.com/user_impersonation"
 
+function windows_one_thread(nthreads)
+    if Sys.iswindows() && nthreads != 1
+        @warn "On Windows, AzStorage is limited to a single thread."
+    end
+    Sys.iswindows() ? 1 : nthreads
+end
+
 """
     container = AzContainer("containername"; storageaccount="myacccount", kwargs...)
 
@@ -105,7 +112,7 @@ function AzContainer(containername::AbstractString; storageaccount, session=AzSe
     name = split(containername, '/')
     _containername = name[1]
     prefix *= lstrip('/'*join(name[2:end], '/'), '/')
-    AzContainer(String(storageaccount), String(_containername), String(prefix), session, nthreads, nretry, verbose)
+    AzContainer(String(storageaccount), String(_containername), String(prefix), session, windows_one_thread(nthreads), nretry, verbose)
 end
 
 function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSession(;lazy=true, scope=__OAUTH_SCOPE); nthreads = Sys.CPU_THREADS, nretry=10, verbose=0)
@@ -114,7 +121,7 @@ function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSes
         d["containername"],
         d["prefix"],
         session,
-        get(d, "nthreads", nthreads),
+        windows_one_thread(get(d, "nthreads", nthreads)),
         get(d, "nretry", nretry),
         get(d, "verbose", verbose))
 end

@@ -16,12 +16,12 @@ sleep(60)
 
 @testset "Error codes" begin
     @test unsafe_load(cglobal((:N_HTTP_RETRY_CODES, AzStorage.libAzStorage), Cint)) == 2
-    x = unsafe_load(cglobal((:HTTP_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
+    x = Sys.iswindows() ? unsafe_load(cglobal((:HTTP_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clonglong})) : unsafe_load(cglobal((:HTTP_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
     y = unsafe_wrap(Array, x, (2,); own=false)
     @test y == [500,503]
 
     @test unsafe_load(cglobal((:N_CURL_RETRY_CODES, AzStorage.libAzStorage), Cint)) == 5
-    x = unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
+    x = Sys.iswindows() ? unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clonglong})) : unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
     y = unsafe_wrap(Array, x, (5,); own=false)
     @test y == [6,7,28,55,56]
 end
@@ -240,7 +240,11 @@ end
     @test _c.storageaccount == storageaccount
     @test _c.containername == "foo-$r-k"
     @test _c.nretry == 10
-    @test _c.nthreads == 2
+    if Sys.iswindows()
+        @test _c.nthreads == 1
+    else
+        @test _c.nthreads == 2
+    end
     rm(c)
 end
 
@@ -478,7 +482,8 @@ end
     rm(c)
 end
 
-@testset "Container,Object, copy blob to blob" begin    sleep(1)
+@testset "Container,Object, copy blob to blob" begin
+    sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+33)))
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     mkpath(c)
@@ -486,4 +491,15 @@ end
     cp(c, "foo.txt", open(c, "bar.txt"))
     @test read(open(c, "bar.txt"), String) == "Hello world"
     rm(c)
+end
+
+@testset "Windows, single thread check" begin
+    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+34)))
+    container = AzContainer("foo-$r.o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    if Sys.iswindows()
+        @test container.nthreads == 1
+    else
+        @test container.nthreads == 2
+    end
 end
