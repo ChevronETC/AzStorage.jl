@@ -5,8 +5,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        julia-version: [1.0, 1.6]
-        os: [ubuntu-latest]
+        julia-version: [1.6]
+        os: [ubuntu-latest, macOS-latest]
     steps:
       - uses: actions/checkout@v1.0.0
       - uses: azure/login@v1.1
