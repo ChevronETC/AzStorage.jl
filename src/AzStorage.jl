@@ -9,6 +9,7 @@ const RETRYABLE_HTTP_ERRORS = [
 
 # https://curl.haxx.se/libcurl/c/libcurl-errors.html
 const RETRYABLE_CURL_ERRORS = [
+    6,  # Couldn't resolve host. The given remote host was not resolved.
     7,  # Failed to connect() to host or proxy.
     28, # Connection timed out.
     55, # Failed sendingnetworkdata.
