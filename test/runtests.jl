@@ -22,8 +22,8 @@ sleep(60)
 
     @test unsafe_load(cglobal((:N_CURL_RETRY_CODES, AzStorage.libAzStorage), Cint)) == 4
     x = unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
-    y = unsafe_wrap(Array, x, (4,); own=false)
-    @test y == [7,28,55,56]
+    y = unsafe_wrap(Array, x, (5,); own=false)
+    @test y == [6,7,28,55,56]
 end
 
 @testset "Containers, equivalent" begin
