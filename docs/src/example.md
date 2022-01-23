@@ -39,7 +39,7 @@ x = deserialize(container, "myblob.bin")
 cp(container, "myblob.bin", "mylocalfile.bin")
 
 # copy a local file to a blob
-cp("mylocalblob.bin", container, "myblob.bin")
+cp("mylocalfile.bin", container, "myblob.bin")
 
 # copy from a blob to another blob
 cp(container, "myblob.bin", container, "mycopyblob.bin")
