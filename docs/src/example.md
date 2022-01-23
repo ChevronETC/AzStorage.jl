@@ -51,7 +51,7 @@ rm(container)
 In addition, we can represent blob's, providing an API that is similar to handling POSIX files.
 
 ```julia
-# create a handle to a blob in a container
+# create a handle, io,  to a blob, "myblob.bin", in a container, "foo", in storage account "mystorageaccount"
 io = open(AzContainer("foo"; storageaccount="mystorageaccount", session), "myblob.bin")
 io = joinpath(AzContainer("foo"; storageaccount="mystorageaccount", session), "myblob.bin") # this is equivalent to the previous line.
 
