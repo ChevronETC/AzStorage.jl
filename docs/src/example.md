@@ -36,7 +36,7 @@ serialize(container, "myblob.bin", (a=rand(10), b=rand(10)))
 x = deserialize(container, "myblob.bin")
 
 # copy a blob to a local file
-cp(container, "myblob.bin", "mylocalblob.bin")
+cp(container, "myblob.bin", "mylocalfile.bin")
 
 # copy a local file to a blob
 cp("mylocalblob.bin", container, "myblob.bin")
