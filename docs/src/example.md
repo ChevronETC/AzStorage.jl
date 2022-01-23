@@ -71,7 +71,7 @@ x = deserialize(io)
 
 write(io, rand(10))
 
-# copy a blob to a local file
+# copy a blob, io, to a local file, mylocalfile.bin
 cp(io, "mylocalfile.bin")
 
 # copy a local file to a blob
