@@ -72,7 +72,7 @@ x = deserialize(io)
 write(io, rand(10))
 
 # copy a blob to a local file
-cp(io, "mylocalblob.bin")
+cp(io, "mylocalfile.bin")
 
 # copy a local file to a blob
 cp("mylocalblob.bin", io)
