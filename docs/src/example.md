@@ -75,7 +75,7 @@ write(io, rand(10))
 cp(io, "mylocalfile.bin")
 
 # copy a local file, mylocalfile.bin, to a blob, io
-cp("mylocalblob.bin", io)
+cp("mylocalfile.bin", io)
 
 # copy from a blob to another blob
 io2 = open(AzContainer("foo"; storageaccount="mystorageaccount", session), "mycopyblob.bin")
