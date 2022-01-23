@@ -35,6 +35,15 @@ serialize(container, "myblob.bin", (a=rand(10), b=rand(10)))
 # read and deserialze data from the container
 x = deserialize(container, "myblob.bin")
 
+# copy a blob to a local file
+cp(container, "myblob.bin", "mylocalfile.bin")
+
+# copy a local file to a blob
+cp("mylocalfile.bin", container, "myblob.bin")
+
+# copy from a blob to another blob
+cp(container, "myblob.bin", container, "mycopyblob.bin")
+
 # remove the container, and its contents
 rm(container)
 ```
@@ -42,9 +51,9 @@ rm(container)
 In addition, we can represent blob's, providing an API that is similar to handling POSIX files.
 
 ```julia
-# create a handle to a blob in a container
-io = open(AzContainer("foo"; storageaccount="mystorageaccount"), "myblob.bin")
-io = joinpath(AzContainer("foo"; storageaccount="mystorageaccount"), "myblob.bin") # this is equivalent to the previous line.
+# create a handle, io,  to a blob, "myblob.bin", in a container, "foo", in storage account "mystorageaccount"
+io = open(AzContainer("foo"; storageaccount="mystorageaccount", session), "myblob.bin")
+io = joinpath(AzContainer("foo"; storageaccount="mystorageaccount", session), "myblob.bin") # this is equivalent to the previous line.
 
 # write to the blob
 write(io, rand(10))
@@ -59,6 +68,18 @@ isfile(io)
 # here, we illustrate with a named tuple
 serialize(io, (a=rand(10),b=rand(10)))
 x = deserialize(io)
+
+write(io, rand(10))
+
+# copy a blob, io, to a local file, mylocalfile.bin
+cp(io, "mylocalfile.bin")
+
+# copy a local file, mylocalfile.bin, to a blob, io
+cp("mylocalfile.bin", io)
+
+# copy from a blob to another blob
+io2 = open(AzContainer("foo"; storageaccount="mystorageaccount", session), "mycopyblob.bin")
+cp(io, io2)
 
 # remove the blob
 rm(io)

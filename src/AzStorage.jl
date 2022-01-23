@@ -503,6 +503,72 @@ read and deserialize a blob `object::AzObject`.  See `deserialize(container, "bl
 Serialization.deserialize(o::AzObject) = deserialize(o.container, o.name)
 
 """
+    cp(from..., to...)
+
+copy a blob to a local file, a local file to a blob, or a blob to a blob.
+
+# Examples
+
+## local file to blob
+```
+cp("localfile.txt", AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt")
+```
+
+## blob to local file
+```
+cp(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt", "localfile.txt")
+```
+
+## blob to blob
+```
+cp(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob_in.txt", AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob_out.txt")
+```
+"""
+function Base.cp(in::AbstractString, outc::AzContainer, outb::AbstractString)
+    bytes = read!(in, Vector{UInt8}(undef,filesize(in)))
+    write(outc, outb, bytes)
+end
+
+function Base.cp(inc::AzContainer, inb::AbstractString, out::AbstractString)
+    bytes = read!(inc, inb, Vector{UInt8}(undef, filesize(inc, inb)))
+    write(out, bytes)
+end
+
+function Base.cp(inc::AzContainer, inb::AbstractString, outc::AzContainer, outb::AbstractString)
+    bytes = read!(inc, inb, Vector{UInt8}(undef, filesize(inc, inb)))
+    write(outc, outb, bytes)
+end
+
+"""
+    cp(from, to)
+
+copy a blob to a local file, a local file to a blob, or a blob to a blob.
+
+# Examples
+
+## local file to blob
+```
+cp("localfile.txt", open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt"))
+```
+
+## blob to local file
+```
+cp(open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt"), "localfile.txt")
+```
+
+## blob to blob
+```
+cp(open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob_in.txt"), open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob_out.txt"))
+```
+"""
+Base.cp(in::AbstractString, out::AzObject) = cp(in, out.container, out.name)
+Base.cp(in::AzObject, out::AbstractString) = cp(in.container, in.name, out)
+Base.cp(in::AzObject, out::AzObject) = cp(in.container, in.name, out.container, out.name)
+
+Base.cp(inc::AzContainer, inb::AbstractString, out::AzObject) = cp(inc, inb, out.container, out.name)
+Base.cp(in::AzObject, outc::AzContainer, outb::AbstractString) = cp(in.container, in.name, outc, outb)
+
+"""
     readdir(container)
 
 list of objects in a container.

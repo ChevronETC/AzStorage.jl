@@ -18,6 +18,8 @@ rm(::AzContainer)
 
 ## Blob methods
 ```@docs
+cp(::AbstractString, ::AzContainer, ::AbstractString)
+cp(::AbstractString, ::AzStorage.AzObject)
 deserialize
 filesize
 isfile

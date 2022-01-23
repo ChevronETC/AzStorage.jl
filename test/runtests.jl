@@ -396,3 +396,94 @@ end
     @test _c["prefix"] == ""
     @test length(_c) == 3
 end
+
+@testset "Container, copy blob to local file" begin
+    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+26)))
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    mkpath(c)
+    write(c, "foo.txt", "Hello world")
+    cp(c, "foo.txt", "foolocal.txt")
+    @test read("foolocal.txt", String) == "Hello world"
+    rm(c)
+    rm("foolocal.txt")
+end
+
+@testset "Container, copy local file to blob" begin
+    sleep(1)
+    write("foolocal.txt", "Hello world")
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+27)))
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    mkpath(c)
+    cp("foolocal.txt", c, "foo.txt")
+    @test read(c, "foo.txt", String) == "Hello world"
+    rm(c)
+    rm("foolocal.txt")
+end
+
+@testset "Container, copy blob to blob" begin
+    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+28)))
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    mkpath(c)
+    write(c, "foo.txt", "Hello world")
+    cp(c, "foo.txt", c, "bar.txt")
+    @test read(c, "bar.txt", String) == "Hello world"
+    rm(c)
+end
+
+@testset "Object, copy blob to local file" begin
+    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+29)))
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    mkpath(c)
+    write(open(c, "foo.txt"), "Hello world")
+    cp(open(c, "foo.txt"), "foolocal.txt")
+    @test read("foolocal.txt", String) == "Hello world"
+    rm(c)
+    rm("foolocal.txt")
+end
+
+@testset "Object, copy local file to blob" begin
+    sleep(1)
+    write("foolocal.txt", "Hello world")
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+30)))
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    mkpath(c)
+    cp("foolocal.txt", open(c, "foo.txt"))
+    @test read(open(c, "foo.txt"), String) == "Hello world"
+    rm(c)
+    rm("foolocal.txt")
+end
+
+@testset "Object, copy blob to blob" begin
+    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+31)))
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    mkpath(c)
+    write(open(c, "foo.txt"), "Hello world")
+    cp(open(c, "foo.txt"), open(c, "bar.txt"))
+    @test read(open(c, "bar.txt"), String) == "Hello world"
+    rm(c)
+end
+
+@testset "Object,Container, copy blob to blob" begin
+    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+32)))
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    mkpath(c)
+    write(open(c, "foo.txt"), "Hello world")
+    cp(open(c, "foo.txt"), c, "bar.txt")
+    @test read(open(c, "bar.txt"), String) == "Hello world"
+    rm(c)
+end
+
+@testset "Container,Object, copy blob to blob" begin    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+33)))
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    mkpath(c)
+    write(open(c, "foo.txt"), "Hello world")
+    cp(c, "foo.txt", open(c, "bar.txt"))
+    @test read(open(c, "bar.txt"), String) == "Hello world"
+    rm(c)
+end
