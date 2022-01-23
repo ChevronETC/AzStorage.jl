@@ -74,7 +74,7 @@ write(io, rand(10))
 # copy a blob, io, to a local file, mylocalfile.bin
 cp(io, "mylocalfile.bin")
 
-# copy a local file to a blob
+# copy a local file, mylocalfile.bin, to a blob, io
 cp("mylocalblob.bin", io)
 
 # copy from a blob to another blob
