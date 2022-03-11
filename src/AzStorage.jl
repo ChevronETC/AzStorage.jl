@@ -250,8 +250,7 @@ function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
         r = ccall((:curl_writebytes_block_retry_threaded, libAzStorage), ResponseCodes,
             (Cstring, Cstring,          Cstring,         Cstring,        Ptr{Cstring}, Ptr{UInt8}, Csize_t,      Cint,       Cint,     Cint,     Cint),
              t,       c.storageaccount, c.containername, addprefix(c,o), _blockids,    data,       length(data), c.nthreads, _nblocks, c.nretry, c.verbose)
-        r.http >= 300 && error("writebytes_block: error code $(r.http)")
-        r.curl > 0 && error("curl error, code=$(r.curl)")
+        (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
 
         putblocklist(c, o, blockids)
     end
@@ -416,8 +415,7 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
         r = ccall((:curl_readbytes_retry_threaded, libAzStorage), ResponseCodes,
             (Cstring, Cstring,          Cstring,         Cstring,        Ptr{UInt8}, Csize_t, Csize_t,      Cint,      Cint,     Cint),
              t,       c.storageaccount, c.containername, addprefix(c,o), data,       offset,  length(data), _nthreads, c.nretry, c.verbose)
-        r.http >= 300 && error("readbytes_threaded!: error code $(r.http)")
-        r.curl > 0 && error("curl error, code=$(r.curl))")
+        (r.http >= 300 || r.curl > 0) && error("readbytes_threaded! error: http code $(r.http), curl code $(r.curl)")
         nothing
     end
 
