@@ -4,6 +4,7 @@ using AbstractStorage, AzSessions, AzStorage_jll, Base64, DelimitedFiles, HTTP, 
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
 const RETRYABLE_HTTP_ERRORS = [
+    404,
     500, # Internal server error
     503] # Service unavailable
 
