@@ -12,6 +12,7 @@ const RETRYABLE_CURL_ERRORS = [
     6,  # Couldn't resolve host. The given remote host was not resolved.
     7,  # Failed to connect() to host or proxy.
     28, # Connection timed out.
+    35, # SSL handshake failure.
     55, # Failed sendingnetworkdata.
     56] # Failure with received network data.
 
