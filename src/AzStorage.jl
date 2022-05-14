@@ -1,6 +1,6 @@
 module AzStorage
 
-using AbstractStorage, AzSessions, AzStorage_jll, Base64, DelimitedFiles, HTTP, LightXML, Serialization, Sockets
+using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles, HTTP, LightXML, Serialization, Sockets
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
 const RETRYABLE_HTTP_ERRORS = [
@@ -244,7 +244,8 @@ function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
     end
 
     function writebytes_block(c, o, data, _nblocks)
-        t = token(c.session)
+        # heuristic to increase probability that token is valid during the retry logic in AzSessions.c
+        t = token(c.session; offset=Minute(30))
         l = ceil(Int, log10(_nblocks))
         blockids = [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
         _blockids = [HTTP.escapeuri(blockid) for blockid in blockids]
@@ -412,7 +413,8 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
     end
 
     function readbytes_threaded!(c, o, data, offset, _nthreads)
-        t = token(c.session)
+        # heuristic to increase probability that token is valid during the retry logic in AzSessions.c
+        t = token(c.session; offset=Minute(30))
         r = ccall((:curl_readbytes_retry_threaded, libAzStorage), ResponseCodes,
             (Cstring, Cstring,          Cstring,         Cstring,        Ptr{UInt8}, Csize_t, Csize_t,      Cint,      Cint,     Cint),
              t,       c.storageaccount, c.containername, addprefix(c,o), data,       offset,  length(data), _nthreads, c.nretry, c.verbose)
