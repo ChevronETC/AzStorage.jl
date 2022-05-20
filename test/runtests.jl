@@ -14,27 +14,25 @@ function robust_mkpath(c)
 end
 
 function robust_joinpath(c, s...)
-    local io
     try
         io = joinpath(c, s...)
+        return io
     catch
         r = randstring('a':'z', 4)
         _c = AzContainer("foo-$r-o"; storageaccount=c.storageaccount, session=c.session, nthreads=2, nretry=10)
         robust_joinpath(_c, s...)
     end
-    io
 end
 
 function robust_open(c, s...)
-    local io
     try
         io = open(c, s...)
+        return io
     catch
         r = randstring('a':'z', 4)
         _c = AzContainer("foo-$r-o"; storageaccount=c.storageaccount, session=c.session, nthreads=2, nretry=10)
         robust_open(_c, s...)
     end
-    io
 end
 
 credentials = JSON.parse(ENV["AZURE_CREDENTIALS"])
