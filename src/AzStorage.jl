@@ -336,6 +336,26 @@ Serialize and write data to `io::AzObject`.  See serialize(conainer, blobname, d
 Serialization.serialize(o::AzObject, data) = serialize(o.container, o.name, data)
 
 """
+    touch(container, "blobname")
+
+Create a zero-byte object with name `blobname` in `container::AzContainer`.
+
+# Example
+```
+container = AzContainer("mycontainer";storageaccount="mystorageaccount")
+touch(container, "foo")
+```
+"""
+Base.touch(c::AzContainer, o::AbstractString) = write(c, o, "")
+
+"""
+    touch(io::AzObject)
+
+Create a zero-byte object for `io`.  See `touch(container::AzContainer, blobname)`.
+"""
+Base.touch(o::AzObject) = touch(o.container, o.name)
+
+"""
     writedlm(container, "blobname", data, args...; options...)
 
 Write the array `data` to a delimited blob with the name `blobname` in container `container::AzContainer`

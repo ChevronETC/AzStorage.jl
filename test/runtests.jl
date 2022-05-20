@@ -282,6 +282,17 @@ end
     rm(c)
 end
 
+@test "Containers, touch" begin
+    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+14)))
+    c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    robust_mkpath(c)
+    touch(c, "bar")
+    @test isfile(c, "bar")
+    @test filesize(c, "bar") == 0
+    rm(c)
+end
+
 @testset "Object, bytes" begin
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+15)))
@@ -347,6 +358,17 @@ end
     _x = deserialize(io)
     @test x.a ≈ _x.a
     @test x.b ≈ _x.b
+end
+
+@testset "Object, touch" begin
+    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+20)))
+    c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    io = AzObject(c, "bar")
+    touch(io)
+    @test isfile(io)
+    @test filesize(io) == 0
+    rm(c)
 end
 
 @testset "Object, number of blocks calculation" begin
