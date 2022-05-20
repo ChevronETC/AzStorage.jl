@@ -358,7 +358,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+19)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    io = joinpath(c, "bar", "baz")
+    io = robust_joinpath(c, "bar", "baz")
     write(io, "hello")
     @test read(io, String) == "hello"
     rm(c)
@@ -380,7 +380,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+20)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    io = joinpath(c, "bar")
+    io = robust_joinpath(c, "bar")
     touch(io)
     @test isfile(io)
     @test filesize(io) == 0
