@@ -1,24 +1,16 @@
 using AbstractStorage, AzSessions, AzStorage, Dates, JSON, Random, Serialization, Test
 
 function robust_mkpath(c)
-    for itry = 1:10
-        try
-            mkpath(c)
-            break
-        catch e
-            if isa(e, HTTP.ExceptionRequest.StatusError) && e.status == 409
-                @warn showerror(stdout, e)
-                r = lowercase(randstring('a':'z'))
-                c = AzContainer("foo-$r-o"; storageaccount=c.storageaccount, session=c.session, nthreads=2, nretry=10)
-            else
-                throw(e)
-            end
-        end
-        if itry == 10
-            throw(e)
-        end
+    local _c
+    try
+        mkpath(c)
+        _c = c
+    catch
+        r = randstring('a':'z', 4)
+        _c = AzContainer("foo-$r-o"; storageaccount=c.storageaccount, session=c.session, nthreads=2, nretry=10)
+        robust_mkpath(_c)
     end
-    c
+    _c
 end
 
 credentials = JSON.parse(ENV["AZURE_CREDENTIALS"])
@@ -61,7 +53,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+0)))
     c = AzContainer("foo-$r-a", storageaccount=storageaccount, session=session)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
 
     write(c, "bar", "one")
     write(c, "baz", "two")
@@ -81,7 +73,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+1)))
     c = AzContainer("foo-$r-b", prefix="prefix", storageaccount=storageaccount, session=session)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
 
     write(c, "bar", "one")
     write(c, "baz", "two")
@@ -105,7 +97,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+2)))
     c = AzContainer("foo-$r-c/prefix", storageaccount=storageaccount, session=session)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
 
     write(c, "bar", "one")
     write(c, "baz", "two")
@@ -144,7 +136,7 @@ end
     suffix = prefix == "" ? "-foo" : "-bar"
     r = lowercase(randstring(MersenneTwister(millisecond(now())+5)))
     c = AzContainer("foo-$r-f$suffix", prefix=prefix, storageaccount=storageaccount, session=session)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
 
     write(c, "bar", rand(UInt8,10))
     write(c, "baz", rand(UInt8,11))
@@ -159,7 +151,7 @@ end
     suffix = prefix == "" ? "-foo" : "-bar"
     r = lowercase(randstring(MersenneTwister(millisecond(now())+6)))
     c = AzContainer("foo-$r-g$suffix", prefix=prefix, storageaccount=storageaccount, session=session, nthreads=nthreads)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
 
     N = 10
     if nthreads == 2
@@ -181,7 +173,7 @@ end
     r = lowercase(randstring(MersenneTwister(millisecond(now())+7)))
     suffix = prefix == "" ? "-foo" : "-bar"
     c = AzContainer("foo-$r-e$suffix", prefix=prefix, storageaccount=storageaccount, session=session)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
 
     x = rand(10)
     write(c, "bar/baz", x)
@@ -195,7 +187,7 @@ end
     r = lowercase(randstring(MersenneTwister(millisecond(now())+8)))
     suffix = prefix == "" ? "-foo" : "-bar"
     c = AzContainer("foo-$r-f$suffix", prefix=prefix, storageaccount=storageaccount, session=session)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
 
     write(c, "bar", "hello world\n")
     @test read(c, "bar", String) == "hello world\n"
@@ -207,7 +199,7 @@ end
     r = lowercase(randstring(MersenneTwister(millisecond(now())+9)))
     suffix = prefix == "" ? "-foo" : "-bar"
     c = AzContainer("foo-$r-g$suffix", prefix=prefix, storageaccount=storageaccount, session=session)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     write(c, "bar", "bar\n")
     write(c, "foo", "foo\n")
     rm(c, "bar")
@@ -222,7 +214,7 @@ end
     r = lowercase(randstring(MersenneTwister(millisecond(now())+10)))
     suffix = prefix == "" ? "-foo" : "-bar"
     c = AzContainer("foo-$r-h$suffix", prefix=prefix, storageaccount=storageaccount, session=session)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     write(c, "bar", "bar\n")
     @test isfile(c, "bar")
     write(c, "bar/baz", "bar\n")
@@ -239,7 +231,7 @@ end
     r = lowercase(randstring(MersenneTwister(millisecond(now())+12)))
     dst = AzContainer("foo-$r-j$suffix", storageaccount=storageaccount, session=session)
 
-    robust_mkpath(src)
+    c = robust_mkpath(src)
     write(src, "bar", "one")
     write(src, "baz", "two")
 
@@ -256,7 +248,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+13)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     _c = Container(AzContainer, JSON.parse(json(c)), c.session)
     @test _c.storageaccount == storageaccount
     @test _c.containername == "foo-$r-k"
@@ -273,7 +265,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+14)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     x = (a=rand(10), b=rand(10))
     serialize(c, "bar", x)
     _x = deserialize(c, "bar")
@@ -282,11 +274,11 @@ end
     rm(c)
 end
 
-@test "Containers, touch" begin
+@testset "Containers, touch" begin
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+14)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     touch(c, "bar")
     @test isfile(c, "bar")
     @test filesize(c, "bar") == 0
@@ -364,7 +356,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+20)))
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    io = AzObject(c, "bar")
+    io = joinpath(c, "bar")
     touch(io)
     @test isfile(io)
     @test filesize(io) == 0
@@ -386,7 +378,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+21)))
     c = AzContainer("foo-$r-l", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     x = rand(2801,13821)
     write(c, "bar", x)
     _x = read!(c, "bar", Array{Float64,2}(undef,2801,13821))
@@ -411,7 +403,7 @@ end
     a = rand(10,20,3)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+23)))
     c = AzContainer("foo-$r-n", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     for i = 1:3
         write(c, "bar$i", @view a[:,:,i])
     end
@@ -428,7 +420,7 @@ end
     a = rand(10,20)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+24)))
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     @test_throws ErrorException write(c, "bar", @view a[1:2:end,1:2:end])
     rm(c)
 end
@@ -448,7 +440,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+26)))
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     write(c, "foo.txt", "Hello world")
     cp(c, "foo.txt", "foolocal.txt")
     @test read("foolocal.txt", String) == "Hello world"
@@ -472,7 +464,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+28)))
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     write(c, "foo.txt", "Hello world")
     cp(c, "foo.txt", c, "bar.txt")
     @test read(c, "bar.txt", String) == "Hello world"
@@ -496,7 +488,7 @@ end
     write("foolocal.txt", "Hello world")
     r = lowercase(randstring(MersenneTwister(millisecond(now())+30)))
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     cp("foolocal.txt", open(c, "foo.txt"))
     @test read(open(c, "foo.txt"), String) == "Hello world"
     rm(c)
@@ -518,7 +510,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+32)))
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     write(open(c, "foo.txt"), "Hello world")
     cp(open(c, "foo.txt"), c, "bar.txt")
     @test read(open(c, "bar.txt"), String) == "Hello world"
@@ -529,7 +521,7 @@ end
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+33)))
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    robust_mkpath(c)
+    c = robust_mkpath(c)
     write(open(c, "foo.txt"), "Hello world")
     cp(c, "foo.txt", open(c, "bar.txt"))
     @test read(open(c, "bar.txt"), String) == "Hello world"
