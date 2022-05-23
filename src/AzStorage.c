@@ -120,6 +120,14 @@ curl_contentlength(
     snprintf(contentlength, BUFFER_SIZE, "Content-Length: %lu", (unsigned long)datasize);
 }
 
+void
+curl_lease(
+        char *lease,
+        char *leaseid)
+{
+    snprintf(lease, BUFFER_SIZE, "x-ms-lease-id: %s", leaseid);
+}
+
 struct DataStruct {
     char *data;
     size_t datasize;
@@ -151,6 +159,7 @@ curl_writebytes_block(
         char   *storageaccount,
         char   *containername,
         char   *blobname,
+        char   *leaseid,
         char   *blockid,
         char   *data,
         size_t  datasize,
@@ -166,6 +175,12 @@ curl_writebytes_block(
     headers = curl_slist_append(headers, "Content-Type: application/octet-stream");
     headers = curl_slist_append(headers, contentlength);
     headers = curl_slist_append(headers, authorization);
+
+    if (strlen(leaseid) > 0) {
+        char lease[BUFFER_SIZE];
+        curl_lease(lease, leaseid);
+        headers = curl_slist_append(headers, lease);
+    }
 
     CURL *curlhandle = curl_easy_init();
 
@@ -216,6 +231,7 @@ curl_writebytes_block_retry(
         char   *storageaccount,
         char   *containername,
         char   *blobname,
+        char   *leaseid,
         char   *blockid,
         char   *data,
         size_t  datasize,
@@ -225,7 +241,7 @@ curl_writebytes_block_retry(
     int iretry;
     struct ResponseCodes responsecodes;
     for (iretry = 0; iretry < nretry; iretry++) {
-        responsecodes = curl_writebytes_block(token, storageaccount, containername, blobname, blockid, data, datasize, verbose);
+        responsecodes = curl_writebytes_block(token, storageaccount, containername, blobname, leaseid, blockid, data, datasize, verbose);
         if (isrestretrycode(responsecodes) == 0) {
             break;
         }
@@ -246,6 +262,7 @@ curl_writebytes_block_retry_threaded(
         char    *storageaccount,
         char    *containername,
         char    *blobname,
+        char    *leaseid,
         char   **blockids,
         char    *data,
         size_t  datasize,
@@ -280,7 +297,7 @@ curl_writebytes_block_retry_threaded(
             block_firstbyte += block_dataremainder;
         }
 
-        struct ResponseCodes responsecodes = curl_writebytes_block_retry(token, storageaccount, containername, blobname, blockids[iblock], data+block_firstbyte, _block_datasize, nretry, verbose);
+        struct ResponseCodes responsecodes = curl_writebytes_block_retry(token, storageaccount, containername, blobname, leaseid, blockids[iblock], data+block_firstbyte, _block_datasize, nretry, verbose);
         thread_responsecode_http[threadid] = MAX(responsecodes.http, thread_responsecode_http[threadid]);
         thread_responsecode_curl[threadid] = MAX(responsecodes.curl, thread_responsecode_curl[threadid]);
     }

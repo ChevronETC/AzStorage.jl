@@ -1,4 +1,4 @@
-using AbstractStorage, AzSessions, AzStorage, Dates, JSON, Random, Serialization, Test
+using AbstractStorage, AzSessions, AzStorage, Dates, HTTP, JSON, Random, Serialization, Test
 
 function robust_mkpath(c)
     local _c
@@ -35,12 +35,14 @@ function robust_open(c, s...)
     end
 end
 
-credentials = JSON.parse(ENV["AZURE_CREDENTIALS"])
-AzSessions.write_manifest(;client_id=credentials["clientId"], client_secret=credentials["clientSecret"], tenant=credentials["tenantId"])
+# credentials = JSON.parse(ENV["AZURE_CREDENTIALS"])
+# AzSessions.write_manifest(;client_id=credentials["clientId"], client_secret=credentials["clientSecret"], tenant=credentials["tenantId"])
 
-session = AzSession(;protocal=AzClientCredentials, client_id=credentials["clientId"], client_secret=credentials["clientSecret"], resource="https://storage.azure.com/")
+# session = AzSession(;protocal=AzClientCredentials, client_id=credentials["clientId"], client_secret=credentials["clientSecret"], resource="https://storage.azure.com/")
+session = AzSession(;scope="openid+offline_access+https://storage.azure.com/user_impersonation")
 
-storageaccount = ENV["STORAGE_ACCOUNT"]
+# storageaccount = ENV["STORAGE_ACCOUNT"]
+storageaccount = "unittester"
 @info "storageaccount=$storageaccount"
 
 for container in containers(;storageaccount=storageaccount,session=session)
@@ -559,4 +561,58 @@ end
     else
         @test container.nthreads == 2
     end
+end
+
+@testset "object lease, small file" begin
+    sleep(1)
+    r = randstring('a':'z', 4)
+    c = AzContainer("foo-$r", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    robust_mkpath(c)
+    write(c, "foo", "Hello world")
+    bloblease = lease(c, "foo")
+    rm(c, "foo")
+    @test isfile(c, "foo")
+    @test_throws HTTP.ExceptionRequest.StatusError write(c, "foo", "Goodbye world")
+    write(c, "foo", "Goodbye world"; lease=bloblease)
+    @test read(c, "foo", String) == "Goodbye world"
+    @test isleased(c, "foo")
+    release(bloblease)
+    @test isleased(c, "foo") == false
+    write(c, "foo", "Hello world")
+    @test read(c, "foo", String) == "Hello world"
+    rm(c, "foo")
+    @test isfile(c, "foo") == false
+    rm(c)
+end
+
+@testset "object lease, large file" begin
+    sleep(1)
+
+    nthreads=4
+    N = round(Int, AzStorage._MINBYTES_PER_BLOCK * nthreads * 5 * (1+rand()) / 8)
+    x = rand(N)
+    y = copy(x)
+    y[1] = x[1]/2
+    z = similar(x)
+
+    r = randstring('a':'z', 4)
+    c = AzContainer("foo-$r", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    robust_mkpath(c)
+    write(c, "foo", x)
+    bloblease = lease(c, "foo")
+    rm(c, "foo")
+    @test isfile(c, "foo")
+    @test_throws ErrorException write(c, "foo", y)
+    write(c, "foo", y; lease=bloblease)
+    read!(c, "foo", z)
+    @test z[1] ≈ y[1]
+    @test isleased(c, "foo")
+    release(bloblease)
+    @test isleased(c, "foo") == false
+    write(c, "foo", x)
+    read!(c, "foo", z)
+    @test z[1] ≈ x[1]
+    rm(c, "foo")
+    @test isfile(c, "foo") == false
+    rm(c)
 end

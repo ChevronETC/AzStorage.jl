@@ -205,24 +205,72 @@ _normpath(s) = Sys.iswindows() ? replace(normpath(s), "\\"=>"/") : normpath(s)
 
 addprefix(c::AzContainer, o) = c.prefix == "" ? o : _normpath("$(c.prefix)/$o")
 
-function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; contenttype="application/octet-stream")
-    function writebytes_blob(c, o, data, contenttype)
+struct BlobLease{A<:AzSessionAbstract} <: AbstractLease
+    id::String
+    c::AzContainer{A}
+    o::String
+end
+
+Base.show(io::IO, l::BlobLease) = write(io, "Blob lease for container '$(l.c.containername)' and blob '$(l.o)'.")
+
+lease_duration(duration) = isinf(duration) ? -1 : duration
+
+id(lease::BlobLease) = lease.id
+id(lease::nothing) = ""
+
+function writeheaders(_::Nothing, c, data, contenttype)
+    [
+        "x-ms-version" => API_VERSION,
+        "Authorization" => "Bearer $(token(c.session))",
+        "Content-Length" => "$(length(data))",
+        "Content-Type" => contenttype,
+        "x-ms-blob-type" => "BlockBlob"
+    ]
+end
+
+function writeheaders(lease::BlobLease, c, data, contenttype)
+    [
+        "x-ms-version" => API_VERSION,
+        "Authorization" => "Bearer $(token(c.session))",
+        "Content-Length" => "$(length(data))",
+        "Content-Type" => contenttype,
+        "x-ms-blob-type" => "BlockBlob",
+        "x-ms-lease-id" => id(lease)
+    ]
+end
+
+function blocklistheaders(_::Nothing, c, blocklist)
+    [
+        "x-ms-version" => API_VERSION,
+        "Authorization" => "Bearer $(token(c.session))",
+        "Content-Type" => "application/octet-stream",
+        "Content-Length" => "$(length(blocklist))"
+    ]
+end
+
+function blocklistheaders(lease::BlobLease, c, blocklist)
+    [
+        "x-ms-version" => API_VERSION,
+        "Authorization" => "Bearer $(token(c.session))",
+        "Content-Type" => "application/octet-stream",
+        "Content-Length" => "$(length(blocklist))",
+        "x-ms-lease-id" => id(lease)
+    ]
+end
+
+function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; contenttype="application/octet-stream", lease=nothing)
+    function writebytes_blob(c, o, data, contenttype, lease)
         @retry c.nretry HTTP.request(
             "PUT",
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
-            Dict(
-                "Authorization" => "Bearer $(token(c.session))",
-                "x-ms-version" => API_VERSION,
-                "Content-Length" => "$(length(data))",
-                "Content-Type" => contenttype,
-                "x-ms-blob-type" => "BlockBlob"),
+            writeheaders(lease, c, data, contenttype),
             data,
             retry = false,
             verbose = c.verbose)
         nothing
     end
 
-    function putblocklist(c, o, blockids)
+    function putblocklist(c, o, blockids, lease)
         xdoc = XMLDocument()
         xroot = create_root(xdoc, "BlockList")
         for blockid in blockids
@@ -233,48 +281,59 @@ function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
         @retry c.nretry HTTP.request(
             "PUT",
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=blocklist",
-            Dict(
-                "x-ms-version" => API_VERSION,
-                "Authorization" => "Bearer $(token(c.session))",
-                "Content-Type" => "application/octet-stream",
-                "Content-Length" => "$(length(blocklist))"),
+            blocklistheaders(lease, c, blocklist),
             blocklist,
             retry = false)
         nothing
     end
 
-    function writebytes_block(c, o, data, _nblocks)
+    function writebytes_block(c, o, data, _nblocks, lease)
         # heuristic to increase probability that token is valid during the retry logic in AzSessions.c
         t = token(c.session; offset=Minute(30))
         l = ceil(Int, log10(_nblocks))
         blockids = [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
         _blockids = [HTTP.escapeuri(blockid) for blockid in blockids]
         r = ccall((:curl_writebytes_block_retry_threaded, libAzStorage), ResponseCodes,
-            (Cstring, Cstring,          Cstring,         Cstring,        Ptr{Cstring}, Ptr{UInt8}, Csize_t,      Cint,       Cint,     Cint,     Cint),
-             t,       c.storageaccount, c.containername, addprefix(c,o), _blockids,    data,       length(data), c.nthreads, _nblocks, c.nretry, c.verbose)
+            (Cstring, Cstring,          Cstring,         Cstring,        Cstring,   Ptr{Cstring}, Ptr{UInt8}, Csize_t,      Cint,       Cint,     Cint,     Cint),
+             t,       c.storageaccount, c.containername, addprefix(c,o), id(lease), _blockids,    data,       length(data), c.nthreads, _nblocks, c.nretry, c.verbose)
         (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
 
-        putblocklist(c, o, blockids)
+        putblocklist(c, o, blockids, lease)
     end
 
     _nblocks = nblocks(c.nthreads, length(data))
     if _nblocks > 1
-        writebytes_block(c, o, data, _nblocks)
+        writebytes_block(c, o, data, _nblocks, lease)
     else
-        writebytes_blob(c, o, data, contenttype)
+        writebytes_blob(c, o, data, contenttype, lease)
     end
     nothing
 end
 
 """
-    write(container, "blobname", data::AbstractString; contenttype="text/plain")
+    write(container, "blobname", data::AbstractString; contenttype="text/plain", lease=nothing)
 
 Write the string `data` to a blob with name `blobname` in `container::AzContainer`.
-Optionally, one can specify the content-type of the blob using the `contenttype` keyword argument.
+Optionally, one can specify:
+1. the content-type of the blob using the `contenttype` keyword argument.
 For example: `content-type="text/plain", `content-type="applicaton/json", etc..
+2. the current lease being used for the job.  The lease can be used to ensure that no other clients/processes
+are changing the blob.
+
+# Lease example
+```
+c = AzContainer("foo"; storageaccount="mystorageaccount")
+mkpath(c)
+touch(c, "bar")
+mylease = lease(c, "bar")
+write(c "bar", "hello") # fails
+write(c, "bar", "hello"; lease=mylease) # success
+isleased(c, "bar") # true
+release(mylease)
+```
 """
-Base.write(c::AzContainer, o::AbstractString, data::AbstractString; contenttype="text/plain") =
-    writebytes(c, o, transcode(UInt8, data); contenttype=contenttype)
+Base.write(c::AzContainer, o::AbstractString, data::AbstractString; contenttype="text/plain", lease=nothing) =
+    writebytes(c, o, transcode(UInt8, data); contenttype=contenttype, lease=lease)
 
 _iscontiguous(data::DenseArray) = isbitstype(eltype(data))
 _iscontiguous(data::SubArray) = isbitstype(eltype(data)) && Base.iscontiguous(data)
@@ -285,18 +344,18 @@ _iscontiguous(data::AbstractArray) = false
 
 Write the array `data` to a blob with the name `blobname` in `container::AzContainer`.
 """
-function Base.write(c::AzContainer, o::AbstractString, data::AbstractArray{T}) where {T}
+function Base.write(c::AzContainer, o::AbstractString, data::AbstractArray{T}; lease=nothing) where {T}
     if _iscontiguous(data)
-        writebytes(c, o, unsafe_wrap(Vector{UInt8}, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false); contenttype="application/octet-stream")
+        writebytes(c, o, unsafe_wrap(Vector{UInt8}, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false); contenttype="application/octet-stream", lease=lease)
     else
         error("AzStorage: `write` is not supported on non-isbits arrays and/or non-contiguous arrays")
     end
 end
 
-Base.write(c::AzContainer, o::AbstractString, data) = error("AzStorage: `write` is only suppoted for DenseArray.")
+Base.write(c::AzContainer, o::AbstractString, data; lease=nothing) = error("AzStorage: `write` is only suppoted for DenseArray.")
 
 """
-    write(io::AzObject, data)
+    write(io::AzObject, data; lease=nothing)
 
 write data to `io::AzObject`.
 
@@ -307,10 +366,10 @@ write(io, rand(10))
 x = read!(io, zeros(10))
 ```
 """
-Base.write(o::AzObject, data) = write(o.container, o.name, data)
+Base.write(o::AzObject, data; lease=nothing) = write(o.container, o.name, data; lease=lease)
 
 """
-    serialize(container, "blobname", data)
+    serialize(container, "blobname", data; lease=nothing)
 
 Serialize and write `data` to a blob with the name `blobname` in `container::AzContainer`.
 
@@ -322,21 +381,21 @@ serialize(container, "foo.bin", (rand(10),rand(20)))
 a,b = deserialize(io)
 ```
 """
-function Serialization.serialize(c::AzContainer, o::AbstractString, data)
+function Serialization.serialize(c::AzContainer, o::AbstractString, data; lease=nothing)
     io = IOBuffer(;write=true)
     serialize(io, data)
-    writebytes(c, o, take!(io); contenttype="application/octet-stream")
+    writebytes(c, o, take!(io); contenttype="application/octet-stream", lease=lease)
 end
 
 """
-    serialize(io::AzObject, data)
+    serialize(io::AzObject, data; lease=nothing)
 
 Serialize and write data to `io::AzObject`.  See serialize(conainer, blobname, data).
 """
-Serialization.serialize(o::AzObject, data) = serialize(o.container, o.name, data)
+Serialization.serialize(o::AzObject, data; lease=nothing) = serialize(o.container, o.name, data; lease=lease)
 
 """
-    touch(container, "blobname")
+    touch(container, "blobname"; lease=nothing)
 
 Create a zero-byte object with name `blobname` in `container::AzContainer`.
 
@@ -346,28 +405,93 @@ container = AzContainer("mycontainer";storageaccount="mystorageaccount")
 touch(container, "foo")
 ```
 """
-Base.touch(c::AzContainer, o::AbstractString) = write(c, o, "")
+Base.touch(c::AzContainer, o::AbstractString; lease=nothing) = write(c, o, ""; lease=lease)
 
 """
-    touch(io::AzObject)
+    touch(io::AzObject; lease=nothing)
 
 Create a zero-byte object for `io`.  See `touch(container::AzContainer, blobname)`.
 """
-Base.touch(o::AzObject) = touch(o.container, o.name)
+Base.touch(o::AzObject; lease=nothing) = touch(o.container, o.name; lease=lease)
 
 """
-    writedlm(container, "blobname", data, args...; options...)
+    mylease = lease(container, "blobanme"; duration=Inf)
 
-Write the array `data` to a delimited blob with the name `blobname` in container `container::AzContainer`
+Create a lease on a blob.  This is analogous to a lock, prevented other
+concurrent processes from mutating the blob.  When a blob is leased,
+mutating operations (e.g. write) must supply the lease.
+
+# Example
+```
+container = AzContainer("foo"; storageaccount="mystorageaccount")
+mylease = lease(container, "existingblob")
+write(container, "existingblob", "hello"; lease=mylease) # works
+write(container, "existingblob", "hello") # fails
+release(mylease)
+```
 """
-function DelimitedFiles.writedlm(c::AzContainer, o::AbstractString, data::AbstractArray, args...; opts...)
-    io = IOBuffer(;write=true)
-    writedlm(io, data, args...; opts...)
-    write(c, o, String(take!(io)))
+function lease(c::AzContainer, o::AbstractString; duration=Inf)
+    r = @retry c.nretry HTTP.request(
+        "PUT",
+        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=lease",
+        ["Authorization" => "Bearer $(token(c.session))", "x-ms-version" => API_VERSION, "x-ms-lease-action" => "acquire", "x-ms-lease-duration" => lease_duration(duration)];
+        retry = false
+    )
+
+    ilease = findfirst(header->header[1] == "x-ms-lease-id", r.headers)
+
+    if ilease === nothing
+        error("unable to obtain lease id")
+    end
+
+    BlobLease(String(r.headers[ilease][2]), c, o)
 end
 
 """
-    writedlm(io:AzObject, data, args...; options...)
+    release(lease::BlobLease)
+
+Remove the lease from the blob that corresponds to `lease::BlobLease`.
+"""
+function release(lease::BlobLease)
+    c = lease.c
+    o = lease.o
+    @retry c.nretry HTTP.request(
+        "PUT",
+        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=lease",
+        ["Authorization" => "Bearer $(token(c.session))", "x-ms-version" => API_VERSION, "x-ms-lease-action" => "release", "x-ms-lease-id" => lease.id];
+        retry = false
+    )
+    nothing
+end
+
+"""
+    isleased(container, "blobname")
+
+Returns true if the blob is leased, and false otherwise.
+"""
+function isleased(c::AzContainer, o::AbstractString)
+    r = @retry c.nretry HTTP.request(
+        "HEAD",
+        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
+        ["Authorization" => "Bearer $(token(c.session))", "x-ms-version" => API_VERSION];
+        retry = false)
+    i = findfirst(header->header[1] == "x-ms-lease-status", r.headers)
+    i === nothing ? false : r.headers[i][2] == "locked"
+end
+
+"""
+    writedlm(container, "blobname", data, args...; lease=nothing, options...)
+
+Write the array `data` to a delimited blob with the name `blobname` in container `container::AzContainer`
+"""
+function DelimitedFiles.writedlm(c::AzContainer, o::AbstractString, data::AbstractArray, args...; lease=nothing, opts...)
+    io = IOBuffer(;write=true)
+    writedlm(io, data, args...; opts...)
+    write(c, o, String(take!(io)); lease=lease)
+end
+
+"""
+    writedlm(io:AzObject, data, args...; lease=nothing, options...)
 
 write the array `data` to `io::AzObject`
 
@@ -378,8 +502,8 @@ writedlm(io, rand(10,10))
 x = readdlm(io)
 ```
 """
-function DelimitedFiles.writedlm(o::AzObject, data::AbstractArray, args...; opts...)
-     writedlm(o.container, o.name, data, args...; opts...)
+function DelimitedFiles.writedlm(o::AzObject, data::AbstractArray, args...; lease=nothing, opts...)
+     writedlm(o.container, o.name, data, args...; lease=lease, opts...)
 end
 
 """
@@ -740,19 +864,32 @@ Returns the size of the blob corresponding to `object::AzObject`
 """
 Base.filesize(o::AzObject) = filesize(o.container, o.name)
 
+function rmheaders(c, lease::BlobLease)
+    [
+        "Authorization" => "Bearer $(token(c.session))",
+        "x-ms-version" => API_VERSION,
+        "x-ms-lease-id" => id(lease)
+    ]
+end
+
+function rmheaders(c, _::Nothing)
+    [
+        "Authorization" => "Bearer $(token(c.session))",
+        "x-ms-version" => API_VERSION
+    ]
+end
+
 """
     rm(container, "blobname")
 
 remove the blob "blobname" from `container::AzContainer`.
 """
-function Base.rm(c::AzContainer, o::AbstractString)
+function Base.rm(c::AzContainer, o::AbstractString; lease=nothing)
     try
         @retry c.nretry HTTP.request(
             "DELETE",
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
-            Dict(
-                "Authorization" => "Bearer $(token(c.session))",
-                "x-ms-version" => API_VERSION),
+            rmheaders(c, lease),
             retry = false)
     catch
         @warn "error removing $(c.containername)/$(addprefix(c,o))"
@@ -765,7 +902,7 @@ end
 
 remove the blob corresponding to `object::AzObject`
 """
-Base.rm(o::AzObject) = rm(o.container, o.name)
+Base.rm(o::AzObject; lease=nothing) = rm(o.container, o.name; lease=lease)
 
 """
     rm(container)
@@ -821,6 +958,6 @@ function Base.cp(src::AzContainer, dst::AzContainer)
     nothing
 end
 
-export AzContainer, containers, readdlm, writedlm
+export AzContainer, containers, isleased, lease, release, readdlm, writedlm
 
 end
