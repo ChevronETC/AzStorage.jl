@@ -139,7 +139,10 @@ function isretryable(e::HTTP.StatusError)
     false
 end
 isretryable(e::Base.IOError) = true
-isretryable(e::HTTP.IOExtras.IOError) = isretryable(e.e)
+isretryable(e::HTTP.Exceptions.ConnectError) = true
+isretryable(e::HTTP.Exceptions.HTTPError) = true
+isretryable(e::HTTP.Exceptions.RequestError) = true
+isretryable(e::HTTP.Exceptions.TimeoutError) = true
 isretryable(e::Base.EOFError) = true
 isretryable(e::Sockets.DNSError) = Base.uverrorname(e.code) == "EAI_NONAME" ? false : true
 isretryable(e) = false
@@ -178,9 +181,10 @@ function Base.mkpath(c::AzContainer)
         @retry c.nretry HTTP.request(
             "PUT",
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)?restype=container",
-            Dict(
+            [
                 "Authorization" => "Bearer $(token(c.session))",
-                "x-ms-version" => API_VERSION),
+                "x-ms-version" => API_VERSION
+            ],
             retry = false)
     end
     nothing
@@ -210,12 +214,13 @@ function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
         @retry c.nretry HTTP.request(
             "PUT",
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
-            Dict(
+            [
                 "Authorization" => "Bearer $(token(c.session))",
                 "x-ms-version" => API_VERSION,
                 "Content-Length" => "$(length(data))",
                 "Content-Type" => contenttype,
-                "x-ms-blob-type" => "BlockBlob"),
+                "x-ms-blob-type" => "BlockBlob"
+            ],
             data,
             retry = false,
             verbose = c.verbose)
@@ -233,11 +238,12 @@ function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
         @retry c.nretry HTTP.request(
             "PUT",
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=blocklist",
-            Dict(
+            [
                 "x-ms-version" => API_VERSION,
                 "Authorization" => "Bearer $(token(c.session))",
                 "Content-Type" => "application/octet-stream",
-                "Content-Length" => "$(length(blocklist))"),
+                "Content-Length" => "$(length(blocklist))"
+            ],
             blocklist,
             retry = false)
         nothing
@@ -421,12 +427,13 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
         @retry c.nretry HTTP.open(
                 "GET",
                 "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
-                Dict(
+                [
                     "Authorization" => "Bearer $(token(c.session))",
                     "x-ms-version" => API_VERSION,
-                    "Range" => "bytes=$offset-$(offset+length(data)-1)"),
-                    retry = false,
-                    verbose = c.verbose) do io
+                    "Range" => "bytes=$offset-$(offset+length(data)-1)"
+                ];
+                retry = false,
+                verbose = c.verbose) do io
             read!(io, data)
         end
         nothing
@@ -608,9 +615,10 @@ function Base.readdir(c::AzContainer; filterlist=true)
         r = @retry c.nretry HTTP.request(
             "GET",
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)?restype=container&comp=list&marker=$marker",
-            Dict(
+            [
                 "Authorization" => "Bearer $(token(c.session))",
-                "x-ms-version" => API_VERSION),
+                "x-ms-version" => API_VERSION
+            ],
             retry = false)
         xroot = root(parse_string(String(r.body)))
         blobs = xroot["Blobs"][1]["Blob"]
@@ -698,9 +706,10 @@ function containers(;storageaccount, session=AzSession(;lazy=true, scope=__OAUTH
         r = @retry nretry HTTP.request(
             "GET",
             "https://$storageaccount.blob.core.windows.net/?comp=list&marker=$marker",
-            Dict(
+            [
                 "Authorization" => "Bearer $(token(session))",
-                "x-ms-version" => API_VERSION),
+                "x-ms-version" => API_VERSION
+            ],
             retry = false)
         xroot = root(parse_string(String(r.body)))
         containers = xroot["Containers"][1]["Container"]
@@ -720,9 +729,10 @@ function Base.filesize(c::AzContainer, o::AbstractString)
     r = @retry c.nretry HTTP.request(
         "HEAD",
         "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
-        Dict(
+        [
             "Authorization" => "Bearer $(token(c.session))",
-            "x-ms-version" => API_VERSION),
+            "x-ms-version" => API_VERSION
+        ],
         retry = false)
     n = 0
     for header in r.headers
@@ -750,9 +760,10 @@ function Base.rm(c::AzContainer, o::AbstractString)
         @retry c.nretry HTTP.request(
             "DELETE",
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
-            Dict(
+            [
                 "Authorization" => "Bearer $(token(c.session))",
-                "x-ms-version" => API_VERSION),
+                "x-ms-version" => API_VERSION
+            ],
             retry = false)
     catch
         @warn "error removing $(c.containername)/$(addprefix(c,o))"
@@ -777,9 +788,10 @@ function Base.rm(c::AzContainer)
         @retry c.nretry HTTP.request(
             "DELETE",
             "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)?restype=container",
-            Dict(
+            [
                 "Authorization" => "Bearer $(token(c.session))",
-                "x-ms-version" => API_VERSION),
+                "x-ms-version" => API_VERSION
+            ],
             retry = false)
     end
 
@@ -812,10 +824,11 @@ function Base.cp(src::AzContainer, dst::AzContainer)
         @retry dst.nretry HTTP.request(
             "PUT",
             "https://$(dst.storageaccount).blob.core.windows.net/$(dst.containername)/$(addprefix(dst,blob))",
-            Dict(
+            [
                 "Authorization" => "Bearer $(token(dst.session))",
                 "x-ms-version" => API_VERSION,
-                "x-ms-copy-source" => "https://$(src.storageaccount).blob.core.windows.net/$(src.containername)/$(addprefix(src,blob))"),
+                "x-ms-copy-source" => "https://$(src.storageaccount).blob.core.windows.net/$(src.containername)/$(addprefix(src,blob))"
+            ],
             retry = false)
     end
     nothing

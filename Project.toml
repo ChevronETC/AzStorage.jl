@@ -1,6 +1,6 @@
 name = "AzStorage"
 uuid = "c6697862-1611-5eae-9ef8-48803c85c8d6"
-version = "1.6.0"
+version = "2.0.0"
 
 [deps]
 AbstractStorage = "14dbef02-f468-5f15-853e-5ec8dee7b899"
@@ -16,9 +16,9 @@ Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 
 [compat]
 AbstractStorage = "^1.1"
-AzSessions = "^1.2"
+AzSessions = "2"
 AzStorage_jll = "0.4"
-HTTP = "0.8, 0.9"
+HTTP = "1"
 LightXML = "0.9"
 julia = "^1.6"
 
