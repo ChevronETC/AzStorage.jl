@@ -17,7 +17,7 @@ const RETRYABLE_CURL_ERRORS = [
     56] # Failure with received network data.
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/versioning-for-the-azure-storage-services
-const API_VERSION = "2021-02-12"
+const API_VERSION = "2021-08-06"
 
 function __init__()
     ccall((:curl_init, libAzStorage), Cvoid, (Cint, Cint, Ptr{Clong}, Ptr{Clong}, Cstring),
