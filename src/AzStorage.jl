@@ -666,9 +666,27 @@ AbstractStorage.minimaldict(c::AzContainer) = Dict("storageaccount"=>c.storageac
 """
     isfile(container, "blobname")
 
-Returns true if the blob "blobname" exists in `container::AzContainer`.
+Returns true if the blob "object" exists in `container::AzContainer`.
 """
-Base.isfile(c::AzContainer, object::AbstractString) = object ∈ readdir(c)
+function Base.isfile(c::AzContainer, object::AbstractString)
+    try
+        @retry c.nretry HTTP.request(
+            "GET",
+            "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,object))?comp=metadata",
+            [
+                "Authorization" => "Bearer $(token(c.session))",
+                "x-ms-version" => API_VERSION
+            ],
+            retry = false)
+    catch e
+        if isa(e, HTTP.Exceptions.StatusError) && e.status == 404
+            return false
+        else
+            throw(e)
+        end
+    end
+    true
+end
 
 """
     isfile(object::AzObject)
