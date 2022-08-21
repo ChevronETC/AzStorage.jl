@@ -762,34 +762,46 @@ function containers(;storageaccount, session=AzSession(;lazy=true, scope=__OAUTH
 end
 
 """
-    filesize(container, "blobname")
+    filesize(container, "blobname"[; ignore_missing=false])
 
-Returns the size of the blob "blobname" that is in `container::AzContainer`
+Returns the size of the blob "blobname" that is in `container::AzContainer`.
+If `ignore_missing` is `true`, then return `0` rather than throwing an error
+when the blob does not exist.
 """
-function Base.filesize(c::AzContainer, o::AbstractString)
-    r = @retry c.nretry HTTP.request(
-        "HEAD",
-        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
-        [
-            "Authorization" => "Bearer $(token(c.session))",
-            "x-ms-version" => API_VERSION
-        ],
-        retry = false)
-    n = 0
-    for header in r.headers
-        if header.first == "Content-Length"
-            n = parse(Int, header.second)
+function Base.filesize(c::AzContainer, o::AbstractString; ignore_missing=false)
+    try
+        r = @retry c.nretry HTTP.request(
+            "HEAD",
+            "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
+            [
+                "Authorization" => "Bearer $(token(c.session))",
+                "x-ms-version" => API_VERSION
+            ],
+            retry = false)
+        n = 0
+        for header in r.headers
+            if header.first == "Content-Length"
+                n = parse(Int, header.second)
+            end
         end
+        return n
+    catch e
+        if isa(e, HTTP.Exceptions.StatusError) && e.status == 404
+            if ignore_missing
+                return 0
+            end
+        end
+        throw(e)
     end
-    n
 end
 
 """
-    filesize(object::AzObject)
+    filesize(object::AzObject[; ignore_missing=false])
 
-Returns the size of the blob corresponding to `object::AzObject`
+Returns the size of the blob corresponding to `object::AzObject`. If `ignore_missing`
+is `true`, then return `0` rather than throwing an error when the blob does not exist.
 """
-Base.filesize(o::AzObject) = filesize(o.container, o.name)
+Base.filesize(o::AzObject; ignore_missing=false) = filesize(o.container, o.name; ignore_missing)
 
 """
     rm(container, "blobname")

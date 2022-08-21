@@ -570,3 +570,16 @@ end
         @test container.nthreads == 2
     end
 end
+
+@testset "Objects, file size" begin
+    sleep(1)
+    r = lowercase(randstring(MersenneTwister(millisecond(now())+34)))
+    c = AzContainer("foo-$r.o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    c = robust_mkpath(c)
+    write(robust_open(c, "foo.txt"), "Hello World")
+    @test filesize(c, "foo.txt") == length("Hello World")
+    @test filesize(open(c, "foo.txt")) == length("Hello World")
+    @test_throws HTTP.Exceptions.StatusError filesize(c, "bar.txt)")
+    @test filesize(c, "bar.txt"; ignore_missing=true) == 0
+    rm(c)
+end
