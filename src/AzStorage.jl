@@ -538,9 +538,12 @@ read and deserialize a blob `object::AzObject`.  See `deserialize(container, "bl
 Serialization.deserialize(o::AzObject) = deserialize(o.container, o.name)
 
 """
-    cp(from..., to...)
+    cp(from..., to...[; ignore_missing=false])
 
-copy a blob to a local file, a local file to a blob, or a blob to a blob.
+copy a blob to a local file, a local file to a blob, or a blob to a blob.  If `ignore_missing`
+is set to `true`, then no error is thrown when `from` does not exist, and the call `cp` becomes
+a no-op.  This is useful to avoid requiring the use of `isfile` before calling `cp` since `isfile`,
+in-turn, makes an API call to the Azure storage service.
 
 # Examples
 
@@ -564,13 +567,33 @@ function Base.cp(in::AbstractString, outc::AzContainer, outb::AbstractString)
     write(outc, outb, bytes)
 end
 
-function Base.cp(inc::AzContainer, inb::AbstractString, out::AbstractString)
-    bytes = read!(inc, inb, Vector{UInt8}(undef, filesize(inc, inb)))
+function Base.cp(inc::AzContainer, inb::AbstractString, out::AbstractString; ignore_missing=false)
+    local bytes
+    try
+        bytes = read!(inc, inb, Vector{UInt8}(undef, filesize(inc, inb)))
+    catch e
+        if isa(e, HTTP.Exceptions.StatusError) && e.status == 404
+            if ignore_missing
+                return 0
+            end
+        end
+        throw(e)
+    end
     write(out, bytes)
 end
 
-function Base.cp(inc::AzContainer, inb::AbstractString, outc::AzContainer, outb::AbstractString)
-    bytes = read!(inc, inb, Vector{UInt8}(undef, filesize(inc, inb)))
+function Base.cp(inc::AzContainer, inb::AbstractString, outc::AzContainer, outb::AbstractString; ignore_missing=false)
+    local bytes
+    try
+        bytes = read!(inc, inb, Vector{UInt8}(undef, filesize(inc, inb)))
+    catch e
+        if isa(e, HTTP.Exceptions.StatusError) && e.status == 404
+            if ignore_missing
+                return 0
+            end
+        end
+        throw(e)
+    end
     write(outc, outb, bytes)
 end
 
@@ -597,11 +620,11 @@ cp(open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblo
 ```
 """
 Base.cp(in::AbstractString, out::AzObject) = cp(in, out.container, out.name)
-Base.cp(in::AzObject, out::AbstractString) = cp(in.container, in.name, out)
-Base.cp(in::AzObject, out::AzObject) = cp(in.container, in.name, out.container, out.name)
+Base.cp(in::AzObject, out::AbstractString; ignore_missing=false) = cp(in.container, in.name, out; ignore_missing)
+Base.cp(in::AzObject, out::AzObject; ignore_missing=false) = cp(in.container, in.name, out.container, out.name; ignore_missing)
 
-Base.cp(inc::AzContainer, inb::AbstractString, out::AzObject) = cp(inc, inb, out.container, out.name)
-Base.cp(in::AzObject, outc::AzContainer, outb::AbstractString) = cp(in.container, in.name, outc, outb)
+Base.cp(inc::AzContainer, inb::AbstractString, out::AzObject; ignore_missing=false) = cp(inc, inb, out.container, out.name; ignore_missing)
+Base.cp(in::AzObject, outc::AzContainer, outb::AbstractString; ignore_missing=false) = cp(in.container, in.name, outc, outb; ignore_missing)
 
 """
     readdir(container)

@@ -1,4 +1,4 @@
-using AbstractStorage, AzSessions, AzStorage, Dates, JSON, Random, Serialization, Test
+using AbstractStorage, AzSessions, AzStorage, Dates, HTTP, JSON, Random, Serialization, Test
 
 function robust_mkpath(c)
     local _c
@@ -489,6 +489,8 @@ end
     c = robust_mkpath(c)
     write(c, "foo.txt", "Hello world")
     cp(c, "foo.txt", c, "bar.txt")
+    @test_throws HTTP.Exceptions.StatusError cp(c, "baz.txt", c, "bar.txt")
+    @test cp(c, "baz.txt", c, "bar.txt"; ignore_missing = true) == 0
     @test read(c, "bar.txt", String) == "Hello world"
     rm(c)
 end
@@ -500,6 +502,8 @@ end
     c = robust_mkpath(c)
     write(robust_open(c, "foo.txt"), "Hello world")
     cp(robust_open(c, "foo.txt"), "foolocal.txt")
+    @test_throws HTTP.Exceptions.StatusError cp(open(c, "baz.txt"), c, "bar.txt")
+    @test cp(open(c, "baz.txt"), c, "bar.txt"; ignore_missing = true) == 0
     @test read("foolocal.txt", String) == "Hello world"
     rm(c)
     rm("foolocal.txt")
@@ -525,10 +529,12 @@ end
     write(robust_open(c, "foo.txt"), "Hello world")
     cp(robust_open(c, "foo.txt"), robust_open(c, "bar.txt"))
     @test read(robust_open(c, "bar.txt"), String) == "Hello world"
+    @test_throws HTTP.Exceptions.StatusError cp(open(c, "baz.txt"), open(c, "bar.txt"))
+    @test cp(open(c, "baz.txt"), open(c, "bar.txt"); ignore_missing = true) == 0
     rm(c)
 end
 
-@testset "Object,Container, copy blob to blob" begin
+@testset "Object,Container, copy blob to local file" begin
     sleep(1)
     r = lowercase(randstring(MersenneTwister(millisecond(now())+32)))
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
@@ -536,6 +542,8 @@ end
     write(robust_open(c, "foo.txt"), "Hello world")
     cp(robust_open(c, "foo.txt"), c, "bar.txt")
     @test read(robust_open(c, "bar.txt"), String) == "Hello world"
+    @test_throws HTTP.Exceptions.StatusError cp(open(c, "baz.txt"), "bar.txt")
+    @test cp(open(c, "baz.txt"), "bar.txt"; ignore_missing = true) == 0
     rm(c)
 end
 
@@ -547,6 +555,8 @@ end
     write(robust_open(c, "foo.txt"), "Hello world")
     cp(c, "foo.txt", robust_open(c, "bar.txt"))
     @test read(robust_open(c, "bar.txt"), String) == "Hello world"
+    @test_throws HTTP.Exceptions.StatusError cp(c, "baz.txt", open(c, "bar.txt"))
+    @test cp(c, "baz.txt", open(c, "bar.txt"); ignore_missing = true) == 0
     rm(c)
 end
 
