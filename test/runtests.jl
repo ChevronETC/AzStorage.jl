@@ -1,4 +1,4 @@
-using AbstractStorage, AzSessions, AzStorage, Dates, JSON, Random, Serialization, Test
+using AbstractStorage, AzSessions, AzStorage, Dates, JSON, Serialization, Test, UUIDs
 
 function robust_mkpath(c)
     local _c
@@ -6,7 +6,7 @@ function robust_mkpath(c)
         mkpath(c)
         _c = c
     catch
-        r = randstring('a':'z', 4)
+        r = uuid4()
         _c = AzContainer("foo-$r-o"; storageaccount=c.storageaccount, session=c.session, nthreads=2, nretry=10)
         robust_mkpath(_c)
     end
@@ -18,7 +18,7 @@ function robust_joinpath(c, s...)
         io = joinpath(c, s...)
         return io
     catch
-        r = randstring('a':'z', 4)
+        r = uuid4()
         _c = AzContainer("foo-$r-o"; storageaccount=c.storageaccount, session=c.session, nthreads=2, nretry=10)
         robust_joinpath(_c, s...)
     end
@@ -29,7 +29,7 @@ function robust_open(c, s...)
         io = open(c, s...)
         return io
     catch
-        r = randstring('a':'z', 4)
+        r = uuid4()
         _c = AzContainer("foo-$r-o"; storageaccount=c.storageaccount, session=c.session, nthreads=2, nretry=10)
         robust_open(_c, s...)
     end
@@ -72,8 +72,7 @@ end
 end
 
 @testset "Containers, list" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+0)))
+    r = uuid4()
     c = AzContainer("foo-$r-a", storageaccount=storageaccount, session=session)
     c = robust_mkpath(c)
 
@@ -92,8 +91,7 @@ end
 end
 
 @testset "Containers, prefix, list" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+1)))
+    r = uuid4()
     c = AzContainer("foo-$r-b", prefix="prefix", storageaccount=storageaccount, session=session)
     c = robust_mkpath(c)
 
@@ -116,8 +114,7 @@ end
 end
 
 @testset "Containers, prefix, list, alt construction" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+2)))
+    r = uuid4()
     c = AzContainer("foo-$r-c/prefix", storageaccount=storageaccount, session=session)
     c = robust_mkpath(c)
 
@@ -140,23 +137,20 @@ end
 end
 
 @testset "Containers, dirname" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+3)))
+    r = uuid4()
     c = AzContainer("foo-$r-d", storageaccount=storageaccount, session=session)
     @test dirname(c) == "foo-$r-d"
 end
 
 @testset "Containers, prefix, dirname" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+4)))
+    r = uuid4()
     c = AzContainer("foo-$r-e", prefix="prefix", storageaccount=storageaccount, session=session)
     @test dirname(c) == "foo-$r-e/prefix"
 end
 
 @testset "Containers, size, prefix=$prefix" for prefix in ("", "prefix")
-    sleep(1)
     suffix = prefix == "" ? "-foo" : "-bar"
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+5)))
+    r = uuid4()
     c = AzContainer("foo-$r-f$suffix", prefix=prefix, storageaccount=storageaccount, session=session)
     c = robust_mkpath(c)
 
@@ -169,9 +163,8 @@ end
 end
 
 @testset "Containers, bytes, nthreads=$nthreads, prefix=$prefix" for nthreads in (1, 2), prefix in ("","prefix")
-    sleep(1)
     suffix = prefix == "" ? "-foo" : "-bar"
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+6)))
+    r = uuid4()
     c = AzContainer("foo-$r-g$suffix", prefix=prefix, storageaccount=storageaccount, session=session, nthreads=nthreads)
     c = robust_mkpath(c)
 
@@ -191,8 +184,7 @@ end
 end
 
 @testset "Containers, bytes, nested folder, prefix=$prefix" for prefix in ("","prefix")
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+7)))
+    r = uuid4()
     suffix = prefix == "" ? "-foo" : "-bar"
     c = AzContainer("foo-$r-e$suffix", prefix=prefix, storageaccount=storageaccount, session=session)
     c = robust_mkpath(c)
@@ -205,8 +197,7 @@ end
 end
 
 @testset "Containers, string, prefix=$prefix" for prefix in ("", "prefix")
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+8)))
+    r = uuid4()
     suffix = prefix == "" ? "-foo" : "-bar"
     c = AzContainer("foo-$r-f$suffix", prefix=prefix, storageaccount=storageaccount, session=session)
     c = robust_mkpath(c)
@@ -217,8 +208,7 @@ end
 end
 
 @testset "Containers, rm, prefix=$prefix" for prefix in ("prefix","")
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+9)))
+    r = uuid4()
     suffix = prefix == "" ? "-foo" : "-bar"
     c = AzContainer("foo-$r-g$suffix", prefix=prefix, storageaccount=storageaccount, session=session)
     c = robust_mkpath(c)
@@ -232,8 +222,7 @@ end
 end
 
 @testset "Containers, isfile, prefix=$prefix" for prefix in ("","prefix")
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+10)))
+    r = uuid4()
     suffix = prefix == "" ? "-foo" : "-bar"
     c = AzContainer("foo-$r-h$suffix", prefix=prefix, storageaccount=storageaccount, session=session)
     c = robust_mkpath(c)
@@ -246,11 +235,10 @@ end
 end
 
 @testset "Containers, cp, prefix=$prefix" for prefix in ("", "prefix")
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+11)))
+    r = uuid4()
     suffix = prefix == "" ? "-foo" : "-bar"
     src = AzContainer("foo-$r-i$suffix", storageaccount=storageaccount, session=session)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+12)))
+    r = uuid4()
     dst = AzContainer("foo-$r-j$suffix", storageaccount=storageaccount, session=session)
 
     c = robust_mkpath(src)
@@ -267,8 +255,7 @@ end
 end
 
 @testset "Containers, json" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+13)))
+    r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
     _c = Container(AzContainer, JSON.parse(json(c)), c.session)
@@ -284,8 +271,7 @@ end
 end
 
 @testset "Containers, serialization" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+14)))
+    r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
     x = (a=rand(10), b=rand(10))
@@ -297,8 +283,7 @@ end
 end
 
 @testset "Containers, touch" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+14)))
+    r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
     touch(c, "bar")
@@ -308,8 +293,7 @@ end
 end
 
 @testset "Object, bytes" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+15)))
+    r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = robust_open(c, "bar")
     x = rand(10)
@@ -320,8 +304,7 @@ end
 end
 
 @testset "Object, bytes" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+16)))
+    r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = robust_open(c, "bar")
     write(io, "hello")
@@ -331,8 +314,7 @@ end
 end
 
 @testset "Object, isfile" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+17)))
+    r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = robust_open(c, "bar")
     write(io, "hello")
@@ -341,8 +323,7 @@ end
 end
 
 @testset "Object, rm" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+18)))
+    r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = robust_open(c, "bar")
     write(io, "hello")
@@ -353,8 +334,7 @@ end
 end
 
 @testset "Object, joinpath" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+19)))
+    r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = robust_joinpath(c, "bar", "baz")
     write(io, "hello")
@@ -363,8 +343,7 @@ end
 end
 
 @testset "Object, serialization" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+20)))
+    r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = robust_open(c, "bar")
     x = (a=rand(10), b=rand(10))
@@ -375,8 +354,7 @@ end
 end
 
 @testset "Object, touch" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+20)))
+    r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = robust_joinpath(c, "bar")
     touch(io)
@@ -397,8 +375,7 @@ end
 # this failed because of a bug in the block-list when using exactly 10 blocks
 # Anusha found the failing example.
 @testset "Anusha's example" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+21)))
+    r = uuid4()
     c = AzContainer("foo-$r-l", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
     x = rand(2801,13821)
@@ -409,9 +386,8 @@ end
 end
 
 @testset "writedlm and readdlm" begin
-    sleep(1)
     a = rand(1000,1000)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+22)))
+    r = uuid4()
     c = AzContainer("foo-$r-m", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = robust_open(c, "bar")
     writedlm(io,a)
@@ -421,9 +397,8 @@ end
 end 
 
 @testset "Containers, bytes, SubArray" begin
-    sleep(1)
     a = rand(10,20,3)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+23)))
+    r = uuid4()
     c = AzContainer("foo-$r-n", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
     for i = 1:3
@@ -438,9 +413,8 @@ end
 end
 
 @testset "Containers, bytes, non-contiguous throws" begin
-    sleep(1)
     a = rand(10,20)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+24)))
+    r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
     @test_throws ErrorException write(c, "bar", @view a[1:2:end,1:2:end])
@@ -448,8 +422,7 @@ end
 end
 
 @testset "Container, minimal dictionary" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+25)))
+    r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     _c = minimaldict(c)
     @test _c["storageaccount"] == storageaccount
@@ -459,8 +432,7 @@ end
 end
 
 @testset "Container, copy blob to local file" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+26)))
+    r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
     write(c, "foo.txt", "Hello world")
@@ -471,9 +443,8 @@ end
 end
 
 @testset "Container, copy local file to blob" begin
-    sleep(1)
     write("foolocal.txt", "Hello world")
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+27)))
+    r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     robust_mkpath(c)
     cp("foolocal.txt", c, "foo.txt")
@@ -483,8 +454,7 @@ end
 end
 
 @testset "Container, copy blob to blob" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+28)))
+    r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
     write(c, "foo.txt", "Hello world")
@@ -494,8 +464,7 @@ end
 end
 
 @testset "Object, copy blob to local file" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+29)))
+    r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
     write(robust_open(c, "foo.txt"), "Hello world")
@@ -506,9 +475,8 @@ end
 end
 
 @testset "Object, copy local file to blob" begin
-    sleep(1)
     write("foolocal.txt", "Hello world")
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+30)))
+    r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
     cp("foolocal.txt", robust_open(c, "foo.txt"))
@@ -518,8 +486,7 @@ end
 end
 
 @testset "Object, copy blob to blob" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+31)))
+    r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     robust_mkpath(c)
     write(robust_open(c, "foo.txt"), "Hello world")
@@ -529,8 +496,7 @@ end
 end
 
 @testset "Object,Container, copy blob to blob" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+32)))
+    r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
     write(robust_open(c, "foo.txt"), "Hello world")
@@ -540,8 +506,7 @@ end
 end
 
 @testset "Container,Object, copy blob to blob" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+33)))
+    r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
     write(robust_open(c, "foo.txt"), "Hello world")
@@ -551,8 +516,7 @@ end
 end
 
 @testset "Windows, single thread check" begin
-    sleep(1)
-    r = lowercase(randstring(MersenneTwister(millisecond(now())+34)))
+    r = uuid4()
     container = AzContainer("foo-$r.o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     if Sys.iswindows()
         @test container.nthreads == 1
