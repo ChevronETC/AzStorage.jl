@@ -330,6 +330,13 @@ end
     @test isfile(io)
     rm(io)
     @test !isfile(io)
+
+    io = robust_open(c, "bar")
+    write(io, "hello")
+    @test isfile(io)
+    rm(io; force=true)
+    @test !isfile(io)
+
     rm(c)
 end
 
