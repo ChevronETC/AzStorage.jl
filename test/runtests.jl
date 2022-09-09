@@ -349,6 +349,23 @@ end
     rm(c)
 end
 
+@testset "Object, open" begin
+    r = uuid4()
+    c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    for (imode,mode) in enumerate(["r", "w", "w+", "r+"])
+        io = open(robust_joinpath(c, "bar", "baz$imode"), mode)
+        write(io, "hello")
+        @test read(io, String) == "hello"
+        rm(io)
+    end
+    io = open(robust_joinpath(c, "bar", "baz"))
+    write(io, "hello")
+    @test read(io, String) == "hello"
+    rm(io)
+
+    rm(c)
+end
+
 @testset "Object, serialization" begin
     r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
