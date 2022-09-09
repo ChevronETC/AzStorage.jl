@@ -81,6 +81,23 @@ write(io, rand(10))
 """
 Base.joinpath(container::AzContainer, name...) = open(container, join(name, '/'))
 
+"""
+    open(object::AzObject[, mode="w+"]) -> object
+
+This is an identity operation to support compatability with POSIX I/O. It allows for the
+following equivalence which can be useful in building methods that are agnostic to storage
+systems:
+```
+io = open(joinpath(AzContainer("foo";storageaccount="bar"), "bar")) # Azure blob sorage
+io = open(joinpath("foo", "bar")) # POSIX
+write(io, "hello")
+close(io)
+```
+Please note that the 'mode' is for compatability with `Base.open` and does not have
+any effect due to the how Azure blob storage works.
+"""
+Base.open(object::AzObject, mode="w+") = object
+
 Base.close(object::AzObject) = nothing
 
 const __OAUTH_SCOPE = "offline_access+openid+https://storage.azure.com/user_impersonation"
