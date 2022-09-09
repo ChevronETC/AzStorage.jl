@@ -790,11 +790,14 @@ function Base.rm(c::AzContainer, o::AbstractString)
 end
 
 """
-    rm(object::AzObject)
+    rm(object::AzObject; force=false)
 
-remove the blob corresponding to `object::AzObject`
+remove the blob corresponding to `object::AzObject`.  Note that
+the `force` keyword argument does not change the behavior of this
+method.  It is included to match Julia's `Base.rm` method, allowing
+the calling code to work on both POSIX and Azure storage.
 """
-Base.rm(o::AzObject) = rm(o.container, o.name)
+Base.rm(o::AzObject; force=false) = rm(o.container, o.name)
 
 """
     rm(container)
