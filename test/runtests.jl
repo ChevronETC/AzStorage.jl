@@ -62,10 +62,10 @@ sleep(60)
 end
 
 @testset "Containers, equivalent" begin
-    x = AzContainer("foo/bar"; storageaccount="baz", nthreads=10)
-    y = AzContainer("foo/bar"; storageaccount="baz", nthreads=11)
-    z = AzContainer("foo/bar"; storageaccount="fiz", nthreads=11)
-    w = AzContainer("foo/fiz"; storageaccount="baz", nthreads=11)
+    x = AzContainer("foo/bar"; storageaccount="baz", nthreads=10, session=session)
+    y = AzContainer("foo/bar"; storageaccount="baz", nthreads=11, session=session)
+    z = AzContainer("foo/bar"; storageaccount="fiz", nthreads=11, session=session)
+    w = AzContainer("foo/fiz"; storageaccount="baz", nthreads=11, session=session)
     @test x == y
     @test x != z
     @test x != w

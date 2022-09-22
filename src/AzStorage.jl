@@ -116,7 +116,7 @@ end
 The storage account must already exist.
 
 # Additional keyword arguments
-* `session=AzSession(;lazy=true,scope=$__OAUTH_SCOPE)` user credentials (see AzSessions.jl package).
+* `session=AzSession(;lazy=false,scope=$__OAUTH_SCOPE)` user credentials (see AzSessions.jl package).
 * `nthreads=Sys.CPU_THREADS` number of system threads that OpenMP will use to thread I/O.
 * `nretry=10` number of retries to the Azure service (when Azure throws a retryable error) before throwing an error.
 * `verbose=0` verbosity flag passed to libcurl.
@@ -126,14 +126,14 @@ The container name can container "/"'s.  If this is the case, then the string pr
 be the container name, and the string that remains will be pre-pended to the blob names.  This allows Azure
 to present blobs in a pseudo-directory structure.
 """
-function AzContainer(containername::AbstractString; storageaccount, session=AzSession(;lazy=true, scope=__OAUTH_SCOPE), nthreads=Sys.CPU_THREADS, nretry=10, verbose=0, prefix="")
+function AzContainer(containername::AbstractString; storageaccount, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nthreads=Sys.CPU_THREADS, nretry=10, verbose=0, prefix="")
     name = split(containername, '/')
     _containername = name[1]
     prefix *= lstrip('/'*join(name[2:end], '/'), '/')
     AzContainer(String(storageaccount), String(_containername), String(prefix), session, windows_one_thread(nthreads), nretry, verbose)
 end
 
-function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSession(;lazy=true, scope=__OAUTH_SCOPE); nthreads = Sys.CPU_THREADS, nretry=10, verbose=0)
+function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE); nthreads = Sys.CPU_THREADS, nretry=10, verbose=0)
     AzContainer(
         d["storageaccount"],
         d["containername"],
@@ -730,11 +730,11 @@ function Base.isdir(c::AzContainer)
 end
 
 """
-    containers(;storageaccount="mystorageaccount", session=AzSession(;lazy=true, scope=__OAUTH_SCOPE))
+    containers(;storageaccount="mystorageaccount", session=AzSession(;lazy=false, scope=__OAUTH_SCOPE))
 
 list all containers in a given storage account.
 """
-function containers(;storageaccount, session=AzSession(;lazy=true, scope=__OAUTH_SCOPE), nretry=5)
+function containers(;storageaccount, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nretry=5)
     marker = ""
     names = String[]
     while true
