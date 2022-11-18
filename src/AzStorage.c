@@ -1,18 +1,15 @@
-#include <curl/curl.h>
-#include <math.h>
-#include <omp.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#include "AzStorage.h"
 
-#define BUFFER_SIZE 16000 // this needs to be large to accomodate large OAuth2 tokens
-#define API_HEADER_BUFFER_SIZE 512
-#define MAXIMUM_BACKOFF 256.0
-#define CURLE_TIMEOUT 600L /* 5 hours */
+int N_HTTP_RETRY_CODES = 0;
+int N_CURL_RETRY_CODES = 0;
+long *HTTP_RETRY_CODES = NULL;
+long *CURL_RETRY_CODES = NULL;
+char API_HEADER[API_HEADER_BUFFER_SIZE];
 
-#define MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+char*
+api_header() {
+    return API_HEADER;
+}
 
 int
 exponential_backoff(
@@ -37,12 +34,6 @@ exponential_backoff(
     return nanosleep(&ts_sleeptime, &ts_remainingtime);
 }
 
-int N_HTTP_RETRY_CODES = 0;
-int N_CURL_RETRY_CODES = 0;
-long *HTTP_RETRY_CODES = NULL;
-long *CURL_RETRY_CODES = NULL;
-char API_HEADER[API_HEADER_BUFFER_SIZE];
-
 void
 curl_init(
         int   n_http_retry_codes,
@@ -61,12 +52,6 @@ curl_init(
 
     curl_global_init(CURL_GLOBAL_ALL);
 }
-
-struct ResponseCodes {
-    long http;
-    long curl;
-    int retry_after;
-};
 
 /*
 https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
@@ -128,11 +113,360 @@ curl_contentlength(
     snprintf(contentlength, BUFFER_SIZE, "Content-Length: %lu", (unsigned long)datasize);
 }
 
-struct DataStruct {
-    char *data;
-    size_t datasize;
-    size_t currentsize;
-};
+size_t
+callback_retry_after_header(
+        char   *ptr,
+        size_t  size,
+        size_t  nmemb,
+        void   *datavoid)
+{
+    struct HeaderStruct *data = (struct HeaderStruct*)datavoid;
+
+    if (strncmp("Retry-After:", ptr, 12) == 0) {
+        int n = sscanf(ptr, "Retry-After:%d", &(data->retry_after));
+        if (n != 1) {
+            printf("Warning: unable to parse Retry-After header, setting Retry-After to 0");
+            data->retry_after = 0;
+        }
+    }
+
+    return size*nmemb;
+}
+
+size_t
+token_callback_readdata(
+        char   *ptr,
+        size_t  size,
+        size_t  nmemb,
+        void   *datavoid)
+{
+    struct DataStruct *datastruct = (struct DataStruct*)datavoid;
+    size_t n = size*nmemb;
+    size_t newsize = datastruct->currentsize + n;
+
+    if (datastruct->currentsize == 0) {
+        datastruct->data = (char*) malloc(newsize);
+    } else {
+        datastruct->data = (char*) realloc(datastruct->data, newsize);
+    }
+
+    memcpy(datastruct->data+datastruct->currentsize, ptr, n);
+    datastruct->currentsize = newsize;
+
+    return n;
+}
+
+void
+get_next_quoted_string(
+        char *data,
+        char *value)
+{
+    int i1 = -1;
+    int i2 = -1;
+    int i;
+    for (i = 0; i < strlen(data); i++) {
+        if (data[i] == '"') {
+            if (i1 < 0) {
+                i1 = i + 1;
+            } else if (i2 < 0) {
+                i2 = i - 1;
+            } else {
+                break;
+            }
+        }
+    }
+    strncpy(value, data+i1, i2-i1+1);
+    value[i2-i1+1] = '\0';
+}
+
+void
+update_tokens_from_refresh_token(
+        char          *data,
+        char          *bearer_token,
+        char          *refresh_token,
+        unsigned long *expiry)
+{
+    char *_data = data;
+    char expiry_string[BUFFER_SIZE];
+    int counter = 0;
+    while (counter < strlen(data)) {
+        if (strncmp(_data, "\"access_token\"", 14) == 0) {
+            counter += 14;
+            _data += 14;
+            get_next_quoted_string(_data, bearer_token);
+        } else if (strncmp(_data, "\"refresh_token\"", 15) == 0) {
+            counter += 15;
+            _data += 15;
+            get_next_quoted_string(_data, refresh_token);
+        } else if (strncmp(_data, "\"expires_on\"", 12) == 0) {
+            counter += 12;
+            _data += 12;
+            get_next_quoted_string(_data, expiry_string);
+            sscanf(expiry_string, "%lu", expiry);
+        } else {
+            counter += 1;
+            _data += 1;
+        }
+    }
+}
+
+struct ResponseCodes
+curl_refresh_tokens_from_refresh_token(
+        char          *bearer_token,
+        char          *refresh_token,
+        unsigned long *expiry,
+        char          *scope,
+        char          *resource,
+        char          *clientid,
+        char          *tenant,
+        int            verbose)
+{
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
+
+    char body[BUFFER_SIZE];
+    snprintf(
+        body,
+        BUFFER_SIZE,
+        "client_id=%s&refresh_token=%s&grant_type=refresh_token&scope=%s&resource=%s",
+        clientid,
+        refresh_token,
+        scope,
+        resource);
+
+    char url[BUFFER_SIZE];
+    snprintf(
+        url,
+        BUFFER_SIZE,
+        "https://login.microsoft.com/%s/oauth2/token",
+        tenant);
+
+    struct DataStruct datastruct;
+
+    datastruct.currentsize = 0;
+    datastruct.datasize = 0;
+    datastruct.data = NULL;
+
+    struct HeaderStruct headerstruct;
+
+    headerstruct.retry_after = 0;
+
+    CURL *curlhandle = curl_easy_init();
+
+    curl_easy_setopt(curlhandle, CURLOPT_URL, url);
+    curl_easy_setopt(curlhandle, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curlhandle, CURLOPT_CUSTOMREQUEST, "POST");
+    curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDSIZE, strlen(body));
+    curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDS, body);
+    curl_easy_setopt(curlhandle, CURLOPT_SSL_VERIFYPEER, 0); /* TODO */
+    curl_easy_setopt(curlhandle, CURLOPT_VERBOSE, verbose);
+    curl_easy_setopt(curlhandle, CURLOPT_TIMEOUT, CURLE_TIMEOUT);
+    curl_easy_setopt(curlhandle, CURLOPT_WRITEFUNCTION, token_callback_readdata);
+    curl_easy_setopt(curlhandle, CURLOPT_WRITEDATA, (void*)&datastruct);
+    curl_easy_setopt(curlhandle, CURLOPT_HEADERFUNCTION, callback_retry_after_header);
+    curl_easy_setopt(curlhandle, CURLOPT_HEADERDATA, &headerstruct);
+
+    char errbuf[CURL_ERROR_SIZE];
+    curl_easy_setopt(curlhandle, CURLOPT_ERRORBUFFER, errbuf);
+
+    long responsecode_http = 200;
+    CURLcode responsecode_curl = curl_easy_perform(curlhandle);
+    curl_easy_getinfo(curlhandle, CURLINFO_RESPONSE_CODE, &responsecode_http);
+
+    if ( (responsecode_curl != CURLE_OK || responsecode_http >= 300) && verbose > 0) {
+        printf("Warning, curl response=%s, http response code=%ld\n", errbuf, responsecode_http);
+    } else {
+        update_tokens_from_refresh_token(datastruct.data, bearer_token, refresh_token, expiry);
+    }
+
+    if (datastruct.data != NULL) {
+        free(datastruct.data);
+        datastruct.data = NULL;
+    }
+
+    curl_easy_cleanup(curlhandle);
+    curl_slist_free_all(headers);
+
+    struct ResponseCodes responsecodes;
+    responsecodes.http = responsecode_http;
+    responsecodes.curl = (long)responsecode_curl;
+    responsecodes.retry_after = headerstruct.retry_after;
+
+    return responsecodes;
+}
+
+void
+update_tokens_from_client_secret(
+        char          *data,
+        char          *bearer_token,
+        unsigned long *expiry)
+{
+    char *_data = data;
+    char expiry_string[BUFFER_SIZE];
+    int counter = 0;
+    while (counter < strlen(data)) {
+        if (strncmp(_data, "\"access_token\"", 14) == 0) {
+            counter += 14;
+            _data += 14;
+            get_next_quoted_string(_data, bearer_token);
+        } else if (strncmp(_data, "\"expires_on\"", 12) == 0) {
+            counter += 12;
+            _data += 12;
+            get_next_quoted_string(_data, expiry_string);
+            sscanf(expiry_string, "%lu", expiry);
+        } else {
+            counter += 1;
+            _data += 1;
+        }
+    }
+}
+
+struct ResponseCodes
+curl_refresh_tokens_from_client_credentials(
+        char          *bearer_token,
+        unsigned long *expiry,
+        char          *resource,
+        char          *clientid,
+        char          *client_secret,
+        char          *tenant,
+        int            verbose)
+{
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
+
+    CURL *curlhandle = curl_easy_init();
+
+    char *_client_secret = curl_easy_escape(curlhandle, client_secret, strlen(client_secret));
+    char *_resource = curl_easy_escape(curlhandle, resource, strlen(resource));
+
+    char body[BUFFER_SIZE];
+    snprintf(
+        body,
+        BUFFER_SIZE,
+        "grant_type=client_credentials&client_id=%s&client_secret=%s&resource=%s",
+        clientid,
+        _client_secret,
+        _resource);
+
+    char url[BUFFER_SIZE];
+    snprintf(
+        url,
+        BUFFER_SIZE,
+        "https://login.microsoft.com/%s/oauth2/token",
+        tenant);
+
+    struct DataStruct datastruct;
+
+    datastruct.currentsize = 0;
+    datastruct.datasize = 0;
+    datastruct.data = NULL;
+
+    struct HeaderStruct headerstruct;
+
+    headerstruct.retry_after = 0;
+
+    curl_easy_setopt(curlhandle, CURLOPT_URL, url);
+    curl_easy_setopt(curlhandle, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curlhandle, CURLOPT_CUSTOMREQUEST, "POST");
+    curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDSIZE, strlen(body));
+    curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDS, body);
+    curl_easy_setopt(curlhandle, CURLOPT_SSL_VERIFYPEER, 0); /* TODO */
+    curl_easy_setopt(curlhandle, CURLOPT_VERBOSE, verbose);
+    curl_easy_setopt(curlhandle, CURLOPT_TIMEOUT, CURLE_TIMEOUT);
+    curl_easy_setopt(curlhandle, CURLOPT_WRITEFUNCTION, token_callback_readdata);
+    curl_easy_setopt(curlhandle, CURLOPT_WRITEDATA, (void*)&datastruct);
+    curl_easy_setopt(curlhandle, CURLOPT_HEADERFUNCTION, callback_retry_after_header);
+    curl_easy_setopt(curlhandle, CURLOPT_HEADERDATA, &headerstruct);
+
+    char errbuf[CURL_ERROR_SIZE];
+    curl_easy_setopt(curlhandle, CURLOPT_ERRORBUFFER, errbuf);
+
+    long responsecode_http = 200;
+    CURLcode responsecode_curl = curl_easy_perform(curlhandle);
+    curl_easy_getinfo(curlhandle, CURLINFO_RESPONSE_CODE, &responsecode_http);
+
+    if ( (responsecode_curl != CURLE_OK || responsecode_http >= 300) && verbose > 0 ) {
+        printf("Warning, curl response=%s, http response code=%ld\n", errbuf, responsecode_http);
+    } else {
+        update_tokens_from_client_secret(datastruct.data, bearer_token, expiry);
+    }
+
+    curl_free(_client_secret);
+    curl_free(_resource);
+
+    struct ResponseCodes responsecodes;
+
+    responsecodes.curl = responsecode_curl;
+    responsecodes.http = responsecode_http;
+    responsecodes.retry_after = headerstruct.retry_after;
+
+    return responsecodes;
+}
+
+struct ResponseCodes
+curl_refresh_tokens(
+        char          *bearer_token,
+        char          *refresh_token,
+        unsigned long *expiry,
+        char          *scope,
+        char          *resource,
+        char          *clientid,
+        char          *client_secret,
+        char          *tenant,
+        int            verbose)
+{
+    unsigned long current_time = (unsigned long) time(NULL);
+    struct ResponseCodes responsecodes;
+    if (current_time < (*expiry - 600)) { /* 10 minute grace period */
+        responsecodes.http = 200;
+        responsecodes.curl = (long)CURLE_OK;
+        return responsecodes;
+    }
+
+    if (refresh_token == NULL && client_secret != NULL) {
+        responsecodes = curl_refresh_tokens_from_client_credentials(bearer_token, expiry, resource, clientid, client_secret, tenant, verbose);
+    } else if (refresh_token != NULL) {
+        responsecodes = curl_refresh_tokens_from_refresh_token(bearer_token, refresh_token, expiry, scope, resource, clientid, tenant, verbose);
+    } else {
+        printf("Unable to refresh tokens without either a refresh token or a client secret");
+        responsecodes.curl = 1000;
+        responsecodes.http = 1000;
+        responsecodes.retry_after = 0;
+    }
+
+    return responsecodes;
+}
+
+struct ResponseCodes
+curl_refresh_tokens_retry(
+        char          *bearer_token,
+        char          *refresh_token,
+        unsigned long *expiry,
+        char          *scope,
+        char          *resource,
+        char          *clientid,
+        char          *client_secret,
+        char          *tenant,
+        int            nretry,
+        int            verbose)
+{
+    int iretry;
+    struct ResponseCodes responsecodes;
+    for (iretry = 0; iretry < nretry; iretry++) {
+        responsecodes = curl_refresh_tokens(bearer_token, refresh_token, expiry, scope, resource, clientid, client_secret, tenant, verbose);
+        if (isrestretrycode(responsecodes) == 0) {
+            break;
+        }
+        if (verbose > 0) {
+            printf("Warning, bad token refresh, retrying, %d/%d, http_responsecode=%ld, curl_responsecode=%ld.\n", iretry+1, nretry, responsecodes.http, responsecodes.curl);
+        }
+        if (exponential_backoff(iretry, responsecodes.retry_after) != 0) {
+            printf("Warning, unable to sleep in exponential backoff due to failed nanosleep call.\n");
+            break;
+        }
+    }
+    return responsecodes;
+}
 
 size_t
 write_callback_readdata(
@@ -151,30 +485,6 @@ write_callback_readdata(
     memcpy(datastruct->data+datastruct->currentsize, ptr, n);
     datastruct->currentsize = newsize;
     return n;
-}
-
-struct HeaderStruct {
-    int retry_after;
-};
-
-size_t
-callback_retry_after_header(
-        char *ptr,
-        size_t size,
-        size_t nmemb,
-        void *datavoid)
-{
-    struct HeaderStruct *data = (struct HeaderStruct*)datavoid;
-
-    if (strncmp("Retry-After:", ptr, 12) == 0) {
-        int n = sscanf(ptr, "Retry-After:%d", &(data->retry_after));
-        if (n != 1) {
-            printf("Warning: unable to parse Retry-After header, setting Retry-After to 0");
-            data->retry_after = 0;
-        }
-    }
-
-    return size*nmemb;
 }
 
 struct ResponseCodes
@@ -286,11 +596,11 @@ curl_writebytes_block_retry_threaded(
         char    *blobname,
         char   **blockids,
         char    *data,
-        size_t  datasize,
-        int     nthreads,
-        int     nblocks,
-        int     nretry,
-        int     verbose)
+        size_t   datasize,
+        int      nthreads,
+        int      nblocks,
+        int      nretry,
+        int      verbose)
 {
     size_t block_datasize = datasize/nblocks;
     size_t block_dataremainder = datasize%nblocks;
