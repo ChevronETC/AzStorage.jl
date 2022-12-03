@@ -3,7 +3,9 @@ module AzStorage
 using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles, HTTP, LightXML, Serialization, Sockets
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
+# https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/request-limits-and-throttling
 const RETRYABLE_HTTP_ERRORS = [
+    429, # Too many requests
     500, # Internal server error
     503] # Service unavailable
 
@@ -149,6 +151,7 @@ Base.:(==)(x::AzContainer, y::AzContainer) = x.storageaccount == y.storageaccoun
 struct ResponseCodes
     http::Int64
     curl::Int64
+    retry_after::Int32
 end
 
 function isretryable(e::HTTP.StatusError)
@@ -163,6 +166,9 @@ isretryable(e::HTTP.Exceptions.TimeoutError) = true
 isretryable(e::Base.EOFError) = true
 isretryable(e::Sockets.DNSError) = Base.uverrorname(e.code) == "EAI_NONAME" ? false : true
 isretryable(e) = false
+
+status(e::HTTP.StatusError) = e.status
+status(e) = 999
 
 function retrywarn(i, s, e)
     @debug "retry $i, sleeping for $s seconds, e=$e"
@@ -179,6 +185,12 @@ macro retry(retries, ex::Expr)
                 (i <= $(esc(retries)) && isretryable(e)) || rethrow(e)
                 maximum_backoff = 256
                 s = min(2.0^(i-1), maximum_backoff) + rand()
+                if status(e) == 429
+                    i = findfirst(header->header[1] == "Retry-After", e.response.headers)
+                    if i !== nothing
+                        s = parse(Int, header[2]) + rand()
+                    end
+                end
                 retrywarn(i, s, e)
                 sleep(s)
             end

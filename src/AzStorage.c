@@ -16,11 +16,18 @@
 
 int
 exponential_backoff(
-        int i)
+        int i,
+        int retry_after)
 {
-    double sleeptime = MIN(pow(2.0, (double)i), MAXIMUM_BACKOFF) + 1.0*rand()/RAND_MAX;
-    double sleeptime_seconds = floor(sleeptime);
-    double sleeptime_nanoseconds = (long)((sleeptime - sleeptime_seconds) * 1000000000.0);
+    double sleeptime_seconds,sleeptime_nanoseconds;
+    if (retry_after > 0) {
+        sleeptime_seconds = retry_after + 1.0*rand()/RAND_MAX;
+        sleeptime_nanoseconds = 0.0;
+    } else {
+        double sleeptime = MIN(pow(2.0, (double)i), MAXIMUM_BACKOFF) + 1.0*rand()/RAND_MAX;
+        sleeptime_seconds = floor(sleeptime);
+        sleeptime_nanoseconds = (long)((sleeptime - sleeptime_seconds) * 1000000000.0);
+    }
 
     struct timespec ts_sleeptime, ts_remainingtime;
 
@@ -58,6 +65,7 @@ curl_init(
 struct ResponseCodes {
     long http;
     long curl;
+    int retry_after;
 };
 
 /*
@@ -145,6 +153,30 @@ write_callback_readdata(
     return n;
 }
 
+struct HeaderStruct {
+    int retry_after;
+};
+
+size_t
+callback_retry_after_header(
+        char *ptr,
+        size_t size,
+        size_t nmemb,
+        void *datavoid)
+{
+    struct HeaderStruct *data = (struct HeaderStruct*)datavoid;
+
+    if (strncmp("Retry-After:", ptr, 12) == 0) {
+        int n = sscanf(ptr, "Retry-After:%d", &(data->retry_after));
+        if (n != 1) {
+            printf("Warning: unable to parse Retry-After header, setting Retry-After to 0");
+            data->retry_after = 0;
+        }
+    }
+
+    return size*nmemb;
+}
+
 struct ResponseCodes
 curl_writebytes_block(
         char   *token,
@@ -167,6 +199,9 @@ curl_writebytes_block(
     headers = curl_slist_append(headers, contentlength);
     headers = curl_slist_append(headers, authorization);
 
+    struct HeaderStruct header_data;
+    header_data.retry_after = 0;
+
     CURL *curlhandle = curl_easy_init();
 
     char url[BUFFER_SIZE];
@@ -188,6 +223,8 @@ curl_writebytes_block(
     curl_easy_setopt(curlhandle, CURLOPT_VERBOSE, verbose);
     curl_easy_setopt(curlhandle, CURLOPT_TIMEOUT, CURLE_TIMEOUT);
     curl_easy_setopt(curlhandle, CURLOPT_WRITEFUNCTION, write_callback_null);
+    curl_easy_setopt(curlhandle, CURLOPT_HEADERFUNCTION, callback_retry_after_header);
+    curl_easy_setopt(curlhandle, CURLOPT_HEADERDATA, &header_data);
 
     char errbuf[CURL_ERROR_SIZE];
     curl_easy_setopt(curlhandle, CURLOPT_ERRORBUFFER, errbuf);
@@ -206,6 +243,7 @@ curl_writebytes_block(
     struct ResponseCodes responsecodes;
     responsecodes.http = responsecode_http;
     responsecodes.curl = (long)responsecode_curl;
+    responsecodes.retry_after = header_data.retry_after;
 
     return responsecodes;
 }
@@ -232,8 +270,8 @@ curl_writebytes_block_retry(
         if (verbose > 0) {
             printf("Warning, bad write, retrying, %d/%d, http_responsecode=%ld, curl_responsecode=%ld.\n", iretry+1, nretry, responsecodes.http, responsecodes.curl);
         }
-        if (exponential_backoff(iretry) != 0) {
-            printf("Warning, unable to sleep in exponential backoff due to failed nanosleep call.\n");
+        if (exponential_backoff(iretry, responsecodes.retry_after) != 0) {
+            printf("Warning, unable to sleep in exponential backoff.\n");
             break;
         }
     }
@@ -323,6 +361,9 @@ curl_readbytes(
     datastruct.datasize = datasize;
     datastruct.currentsize = 0;
 
+    struct HeaderStruct header_data;
+    header_data.retry_after = 0;
+
     CURL *curlhandle = curl_easy_init();
 
     char url[BUFFER_SIZE];
@@ -341,6 +382,8 @@ curl_readbytes(
     curl_easy_setopt(curlhandle, CURLOPT_VERBOSE, verbose);
     curl_easy_setopt(curlhandle, CURLOPT_WRITEFUNCTION, write_callback_readdata);
     curl_easy_setopt(curlhandle, CURLOPT_WRITEDATA, (void*)&datastruct);
+    curl_easy_setopt(curlhandle, CURLOPT_HEADERFUNCTION, callback_retry_after_header);
+    curl_easy_setopt(curlhandle, CURLOPT_HEADERDATA, &header_data);
 
     char errbuf[CURL_ERROR_SIZE];
     curl_easy_setopt(curlhandle, CURLOPT_ERRORBUFFER, errbuf);
@@ -359,6 +402,7 @@ curl_readbytes(
     struct ResponseCodes responsecodes;
     responsecodes.http = responsecode_http;
     responsecodes.curl = (long)responsecode_curl;
+    responsecodes.retry_after = header_data.retry_after;
 
     return responsecodes;
 }
@@ -385,7 +429,7 @@ curl_readbytes_retry(
         if (verbose > 0) {
             printf("Warning, bad read, retrying, %d/%d, http responsecode=%ld, curl responsecode=%ld.\n", iretry+1, nretry, responsecodes.http, responsecodes.curl);
         }
-        if (exponential_backoff(iretry) != 0) {
+        if (exponential_backoff(iretry, responsecodes.retry_after) != 0) {
             printf("Warning, exponential backoff failed\n");
             break;
         }
