@@ -35,10 +35,12 @@ function robust_open(c, s...)
     end
 end
 
-credentials = JSON.parse(ENV["AZURE_CREDENTIALS"])
-AzSessions.write_manifest(;client_id=credentials["clientId"], client_secret=credentials["clientSecret"], tenant=credentials["tenantId"])
+client_id = ENV["CLIENT_ID"]
+client_secret = ENV["CLIENT_SECRET"]
+tenant = ENV["TENANT"]
+AzSessions.write_manifest(;client_id, client_secret, tenant)
 
-session = AzSession(;protocal=AzClientCredentials, client_id=credentials["clientId"], client_secret=credentials["clientSecret"], resource="https://storage.azure.com/")
+session = AzSession(;protocal=AzClientCredentials, client_id, client_secret, resource="https://storage.azure.com/")
 
 storageaccount = ENV["STORAGE_ACCOUNT"]
 @info "storageaccount=$storageaccount"
