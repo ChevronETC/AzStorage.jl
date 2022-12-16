@@ -1,6 +1,6 @@
 module AzStorage
 
-using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles, HTTP, LightXML, Serialization, Sockets
+using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles, HTTP, LightXML, Serialization, Sockets, CSV
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
 # https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/request-limits-and-throttling
@@ -448,6 +448,43 @@ end
 function DelimitedFiles.readdlm(o::AzObject, delim::AbstractChar, args...; opts...)
     readdlm(o.container, o.name, delim, args...; opts...)
 end
+
+# DelimitedFiles will be deprecated and we need to be using CSV.jl
+# readdlm cannot handle leading/trailing whitespace
+"""
+    readcsv(container, "blobname", args...; options...)
+
+Read the data in a delimited blob with the name `blobname` in container `container::AzContainer` using CSV.jl
+"""
+function CSV.readcsv(c::AzContainer, o::AbstractString, args...; opts...)
+    io = IOBuffer(;write=true, read=true)
+    write(io, read(c, o, String))
+    seekstart(io)
+    readcsv(io, args...; opts...)
+end
+
+"""
+    readcsv(io:AzObject, args...; options...)
+
+return the parsed delimited blob from the io object `io::AzObject`
+
+# Example
+```
+io = open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "foo.txt")
+data = readcsv(io)
+```
+"""
+function CSV.readcsv(o::AzObject, args...; opts...)
+    readcsv(o.container, o.name, args...; opts...)
+end
+
+# TODO not sure we need this for csv.jl
+#this is to resolve an function call ambiguity
+#function DelimitedFiles.readdlm(o::AzObject, delim::AbstractChar, args...; opts...)
+#    readdlm(o.container, o.name, delim, args...; opts...)
+#end
+
+
 
 nthreads_effective(nthreads::Integer, nbytes::Integer) = clamp(div(nbytes, _MINBYTES_PER_BLOCK), 1, nthreads)
 
