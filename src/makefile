@@ -2,9 +2,9 @@ local:
 	$(CC) `curl-config --cflags` -O3 -fopenmp -fPIC -c -o AzStorage.o AzStorage.c
 	$(CC) -shared -fopenmp -o libAzStorage.so AzStorage.o `curl-config --libs`
 
-yggdrasil: libAzStorage.${dlext}
+yggdrasil: libAzStorage.$(dlext)
 
-libAzStorage.${dlext}: AzStorage.o
+libAzStorage.$(dlext): AzStorage.o
 	$(CC) -shared -fopenmp -o $@ $^ `curl-config --libs`
 
 AzStorage.$(dlext): AzStorage.c
