@@ -11,4 +11,4 @@ AzStorage.$(dlext): AzStorage.c
 	$(CC) `curl-config --cflags` -O3 -fopenmp -fPIC -c -o $@ $^
 
 clean:
-	rm -rf *.$(dlext) *.o
+	rm -rf *.so *.$(dlext) *.o
