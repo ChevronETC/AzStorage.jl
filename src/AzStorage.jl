@@ -15,6 +15,7 @@ const RETRYABLE_CURL_ERRORS = [
     7,  # Failed to connect() to host or proxy.
     28, # Connection timed out.
     35, # SSL handshake failure.
+    42, # aborted by call-back, used to abort when the first byte to read/write times out.
     55, # Failed sendingnetworkdata.
     56] # Failure with received network data.
 
@@ -32,6 +33,8 @@ mutable struct AzContainer{A<:AzSessionAbstract} <: Container
     prefix::String
     session::A
     nthreads::Int
+    connect_timeout::Int
+    read_timeout::Int
     nretry::Int
     verbose::Int
 end
@@ -43,6 +46,8 @@ function Base.copy(container::AzContainer)
         container.prefix,
         copy(container.session),
         container.nthreads,
+        connect_timeout,
+        read_timeout,
         container.nretry,
         container.verbose)
 end
@@ -120,6 +125,8 @@ The storage account must already exist.
 # Additional keyword arguments
 * `session=AzSession(;lazy=false,scope=$__OAUTH_SCOPE)` user credentials (see AzSessions.jl package).
 * `nthreads=Sys.CPU_THREADS` number of system threads that OpenMP will use to thread I/O.
+* `connect_timeout=30` client-side timeout for connecting to the server.
+* `read_timeout=10` client-side timeout for receiving the first byte from the server.
 * `nretry=10` number of retries to the Azure service (when Azure throws a retryable error) before throwing an error.
 * `verbose=0` verbosity flag passed to libcurl.
 
@@ -128,20 +135,22 @@ The container name can container "/"'s.  If this is the case, then the string pr
 be the container name, and the string that remains will be pre-pended to the blob names.  This allows Azure
 to present blobs in a pseudo-directory structure.
 """
-function AzContainer(containername::AbstractString; storageaccount, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nthreads=Sys.CPU_THREADS, nretry=10, verbose=0, prefix="")
+function AzContainer(containername::AbstractString; storageaccount, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nthreads=Sys.CPU_THREADS, connect_timeout=10, read_timeout=30, nretry=10, verbose=0, prefix="")
     name = split(containername, '/')
     _containername = name[1]
     prefix *= lstrip('/'*join(name[2:end], '/'), '/')
-    AzContainer(String(storageaccount), String(_containername), String(prefix), session, windows_one_thread(nthreads), nretry, verbose)
+    AzContainer(String(storageaccount), String(_containername), String(prefix), session, windows_one_thread(nthreads), connect_timeout, read_timeout, nretry, verbose)
 end
 
-function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE); nthreads = Sys.CPU_THREADS, nretry=10, verbose=0)
+function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE); nthreads=Sys.CPU_THREADS, connect_timeout=10, read_timeout=30, nretry=10, verbose=0)
     AzContainer(
         d["storageaccount"],
         d["containername"],
         d["prefix"],
         session,
         windows_one_thread(get(d, "nthreads", nthreads)),
+        connect_timeout,
+        read_timeout,
         get(d, "nretry", nretry),
         get(d, "verbose", verbose))
 end
@@ -176,13 +185,13 @@ end
 
 macro retry(retries, ex::Expr)
     quote
-        local r
+        r = nothing
         for i = 1:$(esc(retries))
             try
                 r = $(esc(ex))
                 break
             catch e
-                (i <= $(esc(retries)) && isretryable(e)) || rethrow(e)
+                (i <= $(esc(retries)) && isretryable(e)) || throw(e)
                 maximum_backoff = 256
                 s = min(2.0^(i-1), maximum_backoff) + rand()
                 if status(e) == 429
@@ -214,7 +223,10 @@ function Base.mkpath(c::AzContainer)
                 "Authorization" => "Bearer $(token(c.session))",
                 "x-ms-version" => API_VERSION
             ],
-            retry = false)
+            retry = false,
+            verbose = c.verbose,
+            connect_timeout = c.connect_timeout,
+            readtimeout = c.read_timeout)
     end
     nothing
 end
@@ -252,7 +264,9 @@ function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
             ],
             data,
             retry = false,
-            verbose = c.verbose)
+            verbose = c.verbose,
+            connect_timeout = c.connect_timeout,
+            readtimeout = c.read_timeout)
         nothing
     end
 
@@ -274,7 +288,10 @@ function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
                 "Content-Length" => "$(length(blocklist))"
             ],
             blocklist,
-            retry = false)
+            retry = false,
+            verbose = c.verbose,
+            connect_timeout = c.connect_timeout,
+            readtimeout = c.read_timeout)
         nothing
     end
 
@@ -285,18 +302,18 @@ function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
         blockids = [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
         _blockids = [HTTP.escapeuri(blockid) for blockid in blockids]
         r = ccall((:curl_writebytes_block_retry_threaded, libAzStorage), ResponseCodes,
-            (Cstring, Cstring,          Cstring,         Cstring,        Ptr{Cstring}, Ptr{UInt8}, Csize_t,      Cint,       Cint,     Cint,     Cint),
-             t,       c.storageaccount, c.containername, addprefix(c,o), _blockids,    data,       length(data), c.nthreads, _nblocks, c.nretry, c.verbose)
+            (Cstring, Cstring,          Cstring,         Cstring,        Ptr{Cstring}, Ptr{UInt8}, Csize_t,      Cint,       Cint,     Cint,     Cint,      Clong,             Clong),
+             t,       c.storageaccount, c.containername, addprefix(c,o), _blockids,    data,       length(data), c.nthreads, _nblocks, c.nretry, c.verbose, c.connect_timeout, c.read_timeout)
         (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
 
         putblocklist(c, o, blockids)
     end
 
     _nblocks = nblocks(c.nthreads, length(data))
-    if _nblocks > 1
-        writebytes_block(c, o, data, _nblocks)
-    else
+    if Sys.iswindows()
         writebytes_blob(c, o, data, contenttype)
+    else
+        writebytes_block(c, o, data, _nblocks)
     end
     nothing
 end
@@ -381,7 +398,7 @@ container = AzContainer("mycontainer";storageaccount="mystorageaccount")
 touch(container, "foo")
 ```
 """
-Base.touch(c::AzContainer, o::AbstractString) = write(c, o, "")
+Base.touch(c::AzContainer, o::AbstractString) = write(c, o, "\0")
 
 """
     touch(io::AzObject)
@@ -462,7 +479,9 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
                     "Range" => "bytes=$offset-$(offset+length(data)-1)"
                 ];
                 retry = false,
-                verbose = c.verbose) do io
+                verbose = c.verbose,
+                connect_timeout = c.connect_timeout,
+                readtimeout = c.read_timeout) do io
             read!(io, data)
         end
         nothing
@@ -472,17 +491,17 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
         # heuristic to increase probability that token is valid during the retry logic in AzSessions.c
         t = token(c.session; offset=Minute(30))
         r = ccall((:curl_readbytes_retry_threaded, libAzStorage), ResponseCodes,
-            (Cstring, Cstring,          Cstring,         Cstring,        Ptr{UInt8}, Csize_t, Csize_t,      Cint,      Cint,     Cint),
-             t,       c.storageaccount, c.containername, addprefix(c,o), data,       offset,  length(data), _nthreads, c.nretry, c.verbose)
+            (Cstring, Cstring,          Cstring,         Cstring,        Ptr{UInt8}, Csize_t, Csize_t,      Cint,      Cint,     Cint,      Clong,             Clong),
+             t,       c.storageaccount, c.containername, addprefix(c,o), data,       offset,  length(data), _nthreads, c.nretry, c.verbose, c.connect_timeout, c.read_timeout)
         (r.http >= 300 || r.curl > 0) && error("readbytes_threaded! error: http code $(r.http), curl code $(r.curl)")
         nothing
     end
 
     _nthreads = nthreads_effective(c.nthreads, length(data))
-    if _nthreads > 1
-        readbytes_threaded!(c, o, data, offset, _nthreads)
-    else
+    if Sys.iswindows()
         readbytes_serial!(c, o, data, offset)
+    else
+        readbytes_threaded!(c, o, data, offset, _nthreads)
     end
     data
 end
@@ -648,7 +667,10 @@ function Base.readdir(c::AzContainer; filterlist=true)
                 "Authorization" => "Bearer $(token(c.session))",
                 "x-ms-version" => API_VERSION
             ],
-            retry = false)
+            retry = false,
+            verbose = c.verbose,
+            connect_timeout = c.connect_timeout,
+            readtimeout = c.read_timeout)
         xroot = root(parse_string(String(r.body)))
         blobs = xroot["Blobs"][1]["Blob"]
         _names = [content(blob["Name"][1]) for blob in blobs]
@@ -706,7 +728,10 @@ function Base.isfile(c::AzContainer, object::AbstractString)
                 "Authorization" => "Bearer $(token(c.session))",
                 "x-ms-version" => API_VERSION
             ],
-            retry = false)
+            retry = false,
+            verbose = c.verbose,
+            connect_timeout = c.connect_timeout,
+            readtimeout = c.read_timeout)
     catch e
         if isa(e, HTTP.Exceptions.StatusError) && e.status == 404
             return false
@@ -742,11 +767,11 @@ function Base.isdir(c::AzContainer)
 end
 
 """
-    containers(;storageaccount="mystorageaccount", session=AzSession(;lazy=false, scope=__OAUTH_SCOPE))
+    containers(;storageaccount="mystorageaccount", session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nretry=5, verbose=0, connect_timeout=30, read_timeout=10)
 
 list all containers in a given storage account.
 """
-function containers(;storageaccount, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nretry=5)
+function containers(;storageaccount, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nretry=5, verbose=0, connect_timeout=30, read_timeout=10)
     marker = ""
     names = String[]
     while true
@@ -757,7 +782,10 @@ function containers(;storageaccount, session=AzSession(;lazy=false, scope=__OAUT
                 "Authorization" => "Bearer $(token(session))",
                 "x-ms-version" => API_VERSION
             ],
-            retry = false)
+            retry = false,
+            verbose = verbose,
+            connect_timeout = connect_timeout,
+            readtimeout = read_timeout)
         xroot = root(parse_string(String(r.body)))
         containers = xroot["Containers"][1]["Container"]
         names = [names; [content(container["Name"][1]) for container in containers]]
@@ -780,7 +808,10 @@ function Base.filesize(c::AzContainer, o::AbstractString)
             "Authorization" => "Bearer $(token(c.session))",
             "x-ms-version" => API_VERSION
         ],
-        retry = false)
+        retry = false,
+        verbose = c.verbose,
+        connect_timeout = c.connect_timeout,
+        readtimeout = c.read_timeout)
     n = 0
     for header in r.headers
         if header.first == "Content-Length"
@@ -811,7 +842,10 @@ function Base.rm(c::AzContainer, o::AbstractString)
                 "Authorization" => "Bearer $(token(c.session))",
                 "x-ms-version" => API_VERSION
             ],
-            retry = false)
+            retry = false,
+            verbose = c.verbose,
+            connect_timeout = c.connect_timeout,
+            readtimeout = c.read_timeout)
     catch
         @warn "error removing $(c.containername)/$(addprefix(c,o))"
     end
@@ -842,7 +876,10 @@ function Base.rm(c::AzContainer)
                 "Authorization" => "Bearer $(token(c.session))",
                 "x-ms-version" => API_VERSION
             ],
-            retry = false)
+            retry = false,
+            verbose = c.verbose,
+            connect_timeout = c.connect_timeout,
+            readtimeout = c.read_timeout)
     end
 
     try
@@ -879,7 +916,10 @@ function Base.cp(src::AzContainer, dst::AzContainer)
                 "x-ms-version" => API_VERSION,
                 "x-ms-copy-source" => "https://$(src.storageaccount).blob.core.windows.net/$(src.containername)/$(addprefix(src,blob))"
             ],
-            retry = false)
+            retry = false,
+            verbose = src.verbose,
+            connect_timeout = src.connect_timeout,
+            readtimeout = src.read_timeout)
     end
     nothing
 end

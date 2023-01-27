@@ -35,12 +35,15 @@ function robust_open(c, s...)
     end
 end
 
-client_id = ENV["CLIENT_ID"]
-client_secret = ENV["CLIENT_SECRET"]
-tenant = ENV["TENANT"]
-AzSessions.write_manifest(;client_id, client_secret, tenant)
-
-session = AzSession(;protocal=AzClientCredentials, client_id, client_secret, resource="https://storage.azure.com/")
+if haskey(ENV, "TENANT") && haskey(ENV, "CLIENT_ID") && haskey(ENV, "CLIENT_SECRET")
+    client_id = ENV["CLIENT_ID"]
+    client_secret = ENV["CLIENT_SECRET"]
+    tenant = ENV["TENANT"]
+    AzSessions.write_manifest(;client_id, client_secret, tenant)
+    session = AzSession(;protocal=AzClientCredentials, client_id, client_secret, resource="https://storage.azure.com/")
+else
+    session = AzSession(;scope="openid+offline_access+https://storage.azure.com/user_impersonation")
+end
 
 storageaccount = ENV["STORAGE_ACCOUNT"]
 @info "storageaccount=$storageaccount"
@@ -57,10 +60,10 @@ sleep(60)
     y = unsafe_wrap(Array, x, (3,); own=false)
     @test y == [429,500,503]
 
-    @test unsafe_load(cglobal((:N_CURL_RETRY_CODES, AzStorage.libAzStorage), Cint)) == 6
+    @test unsafe_load(cglobal((:N_CURL_RETRY_CODES, AzStorage.libAzStorage), Cint)) == 7
     x = Sys.iswindows() ? unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clonglong})) : unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
-    y = unsafe_wrap(Array, x, (6,); own=false)
-    @test y == [6,7,28,35,55,56]
+    y = unsafe_wrap(Array, x, (7,); own=false)
+    @test y == [6,7,28,35,42,55,56]
 end
 
 @testset "Containers, equivalent" begin
@@ -290,7 +293,7 @@ end
     c = robust_mkpath(c)
     touch(c, "bar")
     @test isfile(c, "bar")
-    @test filesize(c, "bar") == 0
+    @test filesize(c, "bar") == 1 # we write a null charachter to the blob.
     rm(c)
 end
 
@@ -385,7 +388,7 @@ end
     io = robust_joinpath(c, "bar")
     touch(io)
     @test isfile(io)
-    @test filesize(io) == 0
+    @test filesize(io) == 1
     rm(c)
 end
 
@@ -549,4 +552,11 @@ end
     else
         @test container.nthreads == 2
     end
+end
+
+@testset "timeouts" begin
+    r = uuid4()
+    c = AzContainer("foo-$r.o", storageaccount=storageaccount, session=session, nretry=0, connect_timeout=2, read_timeout=3)
+    @test c.connect_timeout == 2
+    @test c.read_timeout == 3
 end
