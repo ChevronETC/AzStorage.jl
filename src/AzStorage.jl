@@ -23,8 +23,7 @@ const RETRYABLE_CURL_ERRORS = [
 const API_VERSION = "2021-08-06"
 
 function __init__()
-    ccall((:curl_init, libAzStorage), Cvoid, (Cint, Cint, Ptr{Clong}, Ptr{Clong}, Cstring),
-        length(RETRYABLE_HTTP_ERRORS), length(RETRYABLE_CURL_ERRORS), RETRYABLE_HTTP_ERRORS, RETRYABLE_CURL_ERRORS, API_VERSION)
+    @ccall libAzStorage.curl_init(length(RETRYABLE_HTTP_ERRORS)::Cint, length(RETRYABLE_CURL_ERRORS)::Cint, RETRYABLE_HTTP_ERRORS::Ptr{Clong}, RETRYABLE_CURL_ERRORS::Ptr{Clong}, API_VERSION::Cstring)::Cvoid
 end
 
 mutable struct AzContainer{A<:AzSessionAbstract} <: Container
@@ -301,9 +300,8 @@ function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
         l = ceil(Int, log10(_nblocks))
         blockids = [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
         _blockids = [HTTP.escapeuri(blockid) for blockid in blockids]
-        r = ccall((:curl_writebytes_block_retry_threaded, libAzStorage), ResponseCodes,
-            (Cstring, Cstring,          Cstring,         Cstring,        Ptr{Cstring}, Ptr{UInt8}, Csize_t,      Cint,       Cint,     Cint,     Cint,      Clong,             Clong),
-             t,       c.storageaccount, c.containername, addprefix(c,o), _blockids,    data,       length(data), c.nthreads, _nblocks, c.nretry, c.verbose, c.connect_timeout, c.read_timeout)
+        r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(t::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, _blockids::Ptr{Cstring},
+            data::Ptr{UInt8}, length(data)::Csize_t, c.nthreads::Cint, _nblocks::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::ResponseCodes
         (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
 
         putblocklist(c, o, blockids)
@@ -490,9 +488,9 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
     function readbytes_threaded!(c, o, data, offset, _nthreads)
         # heuristic to increase probability that token is valid during the retry logic in AzSessions.c
         t = token(c.session; offset=Minute(30))
-        r = ccall((:curl_readbytes_retry_threaded, libAzStorage), ResponseCodes,
-            (Cstring, Cstring,          Cstring,         Cstring,        Ptr{UInt8}, Csize_t, Csize_t,      Cint,      Cint,     Cint,      Clong,             Clong),
-             t,       c.storageaccount, c.containername, addprefix(c,o), data,       offset,  length(data), _nthreads, c.nretry, c.verbose, c.connect_timeout, c.read_timeout)
+        r = @ccall libAzStorage.curl_readbytes_retry_threaded(t::Cstring, c.storageaccount::Cstring, c.containername::Cstring,
+                addprefix(c,o)::Cstring, data::Ptr{UInt8}, offset::Csize_t, length(data)::Csize_t, _nthreads::Cint, c.nretry::Cint,
+                c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::ResponseCodes
         (r.http >= 300 || r.curl > 0) && error("readbytes_threaded! error: http code $(r.http), curl code $(r.curl)")
         nothing
     end
