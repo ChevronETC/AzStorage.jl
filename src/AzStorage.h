@@ -12,7 +12,7 @@
 #define BUFFER_SIZE 16000 // this needs to be large to accomodate large OAuth2 tokens
 #define API_HEADER_BUFFER_SIZE 512
 #define MAXIMUM_BACKOFF 256.0
-#define CURLE_TIMEOUT 600L /* 5 hours */
+#define CURLE_TIMEOUT 18000L /* 5 hours */
 
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
@@ -80,7 +80,9 @@ curl_writebytes_block_retry_threaded(
     int    nthreads,
     int    nblocks,
     int    nretry,
-    int    verbose);
+    int    verbose,
+    long   connect_timeout,
+    long   read_timeout);
 
 struct ResponseCodes
 curl_readbytes_retry_threaded(
@@ -93,7 +95,9 @@ curl_readbytes_retry_threaded(
     size_t datasize,
     int    nthreads,
     int    nretry,
-    int    verbose);
+    int    verbose,
+    long   connect_timeout,
+    long   read_timeout);
 
 struct ResponseCodes
 curl_refresh_tokens_retry(
@@ -106,7 +110,9 @@ curl_refresh_tokens_retry(
     char          *client_secret,
     char          *tenant,
     int            nretry,
-    int            verbose);
+    int            verbose,
+    long           connect_timeout,
+    long           read_timeout);
 
 int
 isrestretrycode(

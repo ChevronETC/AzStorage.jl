@@ -210,6 +210,39 @@ update_tokens_from_refresh_token(
     }
 }
 
+struct ProgressStruct {
+    unsigned long start_time;
+    unsigned long read_timeout;
+    curl_off_t dlprev;
+    curl_off_t ulprev;
+};
+
+int
+progress_callback(
+        void *_progressstruct,
+        curl_off_t dltotal,
+        curl_off_t dlnow,
+        curl_off_t ultotal,
+        curl_off_t ulnow)
+{
+    struct ProgressStruct *progressstruct = (struct ProgressStruct*)_progressstruct;
+    long int elapsed_time = (unsigned long)time(NULL) - progressstruct->start_time;
+
+    curl_off_t dldelta = dlnow - progressstruct->dlprev;
+    curl_off_t uldelta = ulnow - progressstruct->ulprev;
+
+    if ( (dldelta == 0 && elapsed_time >= progressstruct->read_timeout) || (uldelta == 0 && elapsed_time >= progressstruct->read_timeout) ) {
+        return 1;
+    }
+    if (dldelta > 0 || uldelta > 0) {
+        progressstruct->start_time = (unsigned long)time(NULL);
+        progressstruct->dlprev = dlnow;
+        progressstruct->ulprev = ulnow;
+    }
+
+    return 0;
+}
+
 struct ResponseCodes
 curl_refresh_tokens_from_refresh_token(
         char          *bearer_token,
@@ -219,7 +252,9 @@ curl_refresh_tokens_from_refresh_token(
         char          *resource,
         char          *clientid,
         char          *tenant,
-        int            verbose)
+        int            verbose,
+        long           connect_timeout,
+        long           read_timeout)
 {
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
@@ -251,6 +286,12 @@ curl_refresh_tokens_from_refresh_token(
 
     headerstruct.retry_after = 0;
 
+    struct ProgressStruct progressstruct;
+    progressstruct.start_time = (unsigned long)time(NULL);
+    progressstruct.read_timeout = read_timeout;
+    progressstruct.dlprev = 0;
+    progressstruct.ulprev = 0;
+
     CURL *curlhandle = curl_easy_init();
 
     curl_easy_setopt(curlhandle, CURLOPT_URL, url);
@@ -260,11 +301,15 @@ curl_refresh_tokens_from_refresh_token(
     curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDS, body);
     curl_easy_setopt(curlhandle, CURLOPT_SSL_VERIFYPEER, 0); /* TODO */
     curl_easy_setopt(curlhandle, CURLOPT_VERBOSE, verbose);
-    curl_easy_setopt(curlhandle, CURLOPT_TIMEOUT, CURLE_TIMEOUT);
     curl_easy_setopt(curlhandle, CURLOPT_WRITEFUNCTION, token_callback_readdata);
     curl_easy_setopt(curlhandle, CURLOPT_WRITEDATA, (void*)&datastruct);
     curl_easy_setopt(curlhandle, CURLOPT_HEADERFUNCTION, callback_retry_after_header);
     curl_easy_setopt(curlhandle, CURLOPT_HEADERDATA, &headerstruct);
+    curl_easy_setopt(curlhandle, CURLOPT_TIMEOUT, CURLE_TIMEOUT);
+    curl_easy_setopt(curlhandle, CURLOPT_CONNECTTIMEOUT, connect_timeout);
+    curl_easy_setopt(curlhandle, CURLOPT_NOPROGRESS, 0);
+    curl_easy_setopt(curlhandle, CURLOPT_XFERINFODATA, &progressstruct);
+    curl_easy_setopt(curlhandle, CURLOPT_XFERINFOFUNCTION, progress_callback);
 
     char errbuf[CURL_ERROR_SIZE];
     curl_easy_setopt(curlhandle, CURLOPT_ERRORBUFFER, errbuf);
@@ -329,7 +374,9 @@ curl_refresh_tokens_from_client_credentials(
         char          *clientid,
         char          *client_secret,
         char          *tenant,
-        int            verbose)
+        int            verbose,
+        long           connect_timeout,
+        long           read_timeout)
 {
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
@@ -365,6 +412,12 @@ curl_refresh_tokens_from_client_credentials(
 
     headerstruct.retry_after = 0;
 
+    struct ProgressStruct progressstruct;
+    progressstruct.start_time = (unsigned long)time(NULL);
+    progressstruct.read_timeout = read_timeout;
+    progressstruct.dlprev = 0;
+    progressstruct.ulprev = 0;
+
     curl_easy_setopt(curlhandle, CURLOPT_URL, url);
     curl_easy_setopt(curlhandle, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curlhandle, CURLOPT_CUSTOMREQUEST, "POST");
@@ -372,11 +425,15 @@ curl_refresh_tokens_from_client_credentials(
     curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDS, body);
     curl_easy_setopt(curlhandle, CURLOPT_SSL_VERIFYPEER, 0); /* TODO */
     curl_easy_setopt(curlhandle, CURLOPT_VERBOSE, verbose);
-    curl_easy_setopt(curlhandle, CURLOPT_TIMEOUT, CURLE_TIMEOUT);
     curl_easy_setopt(curlhandle, CURLOPT_WRITEFUNCTION, token_callback_readdata);
     curl_easy_setopt(curlhandle, CURLOPT_WRITEDATA, (void*)&datastruct);
     curl_easy_setopt(curlhandle, CURLOPT_HEADERFUNCTION, callback_retry_after_header);
     curl_easy_setopt(curlhandle, CURLOPT_HEADERDATA, &headerstruct);
+    curl_easy_setopt(curlhandle, CURLOPT_TIMEOUT, CURLE_TIMEOUT);
+    curl_easy_setopt(curlhandle, CURLOPT_CONNECTTIMEOUT, connect_timeout);
+    curl_easy_setopt(curlhandle, CURLOPT_NOPROGRESS, 0);
+    curl_easy_setopt(curlhandle, CURLOPT_XFERINFODATA, &progressstruct);
+    curl_easy_setopt(curlhandle, CURLOPT_XFERINFOFUNCTION, progress_callback);
 
     char errbuf[CURL_ERROR_SIZE];
     curl_easy_setopt(curlhandle, CURLOPT_ERRORBUFFER, errbuf);
@@ -413,7 +470,9 @@ curl_refresh_tokens(
         char          *clientid,
         char          *client_secret,
         char          *tenant,
-        int            verbose)
+        int            verbose,
+        long           connect_timeout,
+        long           read_timeout)
 {
     unsigned long current_time = (unsigned long) time(NULL);
     struct ResponseCodes responsecodes;
@@ -424,9 +483,9 @@ curl_refresh_tokens(
     }
 
     if (refresh_token == NULL && client_secret != NULL) {
-        responsecodes = curl_refresh_tokens_from_client_credentials(bearer_token, expiry, resource, clientid, client_secret, tenant, verbose);
+        responsecodes = curl_refresh_tokens_from_client_credentials(bearer_token, expiry, resource, clientid, client_secret, tenant, verbose, connect_timeout, read_timeout);
     } else if (refresh_token != NULL) {
-        responsecodes = curl_refresh_tokens_from_refresh_token(bearer_token, refresh_token, expiry, scope, resource, clientid, tenant, verbose);
+        responsecodes = curl_refresh_tokens_from_refresh_token(bearer_token, refresh_token, expiry, scope, resource, clientid, tenant, verbose, connect_timeout, read_timeout);
     } else {
         printf("Unable to refresh tokens without either a refresh token or a client secret");
         responsecodes.curl = 1000;
@@ -448,12 +507,14 @@ curl_refresh_tokens_retry(
         char          *client_secret,
         char          *tenant,
         int            nretry,
-        int            verbose)
+        int            verbose,
+        long           connect_timeout,
+        long           read_timeout)
 {
     int iretry;
     struct ResponseCodes responsecodes;
     for (iretry = 0; iretry < nretry; iretry++) {
-        responsecodes = curl_refresh_tokens(bearer_token, refresh_token, expiry, scope, resource, clientid, client_secret, tenant, verbose);
+        responsecodes = curl_refresh_tokens(bearer_token, refresh_token, expiry, scope, resource, clientid, client_secret, tenant, verbose, connect_timeout, read_timeout);
         if (isrestretrycode(responsecodes) == 0) {
             break;
         }
@@ -496,7 +557,9 @@ curl_writebytes_block(
         char   *blockid,
         char   *data,
         size_t  datasize,
-        int     verbose)
+        int     verbose,
+        long    connect_timeout,
+        long    read_timeout)
 {
     char authorization[BUFFER_SIZE];
     curl_authorization(token, authorization);
@@ -511,6 +574,12 @@ curl_writebytes_block(
 
     struct HeaderStruct header_data;
     header_data.retry_after = 0;
+
+    struct ProgressStruct progressstruct;
+    progressstruct.start_time = (unsigned long)time(NULL);
+    progressstruct.read_timeout = read_timeout;
+    progressstruct.dlprev = 0;
+    progressstruct.ulprev = 0;
 
     CURL *curlhandle = curl_easy_init();
 
@@ -531,10 +600,14 @@ curl_writebytes_block(
     curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDS, data);
     curl_easy_setopt(curlhandle, CURLOPT_SSL_VERIFYPEER, 0); /* TODO */
     curl_easy_setopt(curlhandle, CURLOPT_VERBOSE, verbose);
-    curl_easy_setopt(curlhandle, CURLOPT_TIMEOUT, CURLE_TIMEOUT);
     curl_easy_setopt(curlhandle, CURLOPT_WRITEFUNCTION, write_callback_null);
     curl_easy_setopt(curlhandle, CURLOPT_HEADERFUNCTION, callback_retry_after_header);
     curl_easy_setopt(curlhandle, CURLOPT_HEADERDATA, &header_data);
+    curl_easy_setopt(curlhandle, CURLOPT_TIMEOUT, CURLE_TIMEOUT);
+    curl_easy_setopt(curlhandle, CURLOPT_CONNECTTIMEOUT, connect_timeout);
+    curl_easy_setopt(curlhandle, CURLOPT_NOPROGRESS, 0);
+    curl_easy_setopt(curlhandle, CURLOPT_XFERINFODATA, &progressstruct);
+    curl_easy_setopt(curlhandle, CURLOPT_XFERINFOFUNCTION, progress_callback);
 
     char errbuf[CURL_ERROR_SIZE];
     curl_easy_setopt(curlhandle, CURLOPT_ERRORBUFFER, errbuf);
@@ -568,12 +641,14 @@ curl_writebytes_block_retry(
         char   *data,
         size_t  datasize,
         int     nretry,
-        int     verbose)
+        int     verbose,
+        long    connect_timeout,
+        long    read_timeout)
 {
     int iretry;
     struct ResponseCodes responsecodes;
     for (iretry = 0; iretry < nretry; iretry++) {
-        responsecodes = curl_writebytes_block(token, storageaccount, containername, blobname, blockid, data, datasize, verbose);
+        responsecodes = curl_writebytes_block(token, storageaccount, containername, blobname, blockid, data, datasize, verbose, connect_timeout, read_timeout);
         if (isrestretrycode(responsecodes) == 0) {
             break;
         }
@@ -600,7 +675,9 @@ curl_writebytes_block_retry_threaded(
         int      nthreads,
         int      nblocks,
         int      nretry,
-        int      verbose)
+        int      verbose,
+        long     connect_timeout,
+        long     read_timeout)
 {
     size_t block_datasize = datasize/nblocks;
     size_t block_dataremainder = datasize%nblocks;
@@ -628,7 +705,7 @@ curl_writebytes_block_retry_threaded(
             block_firstbyte += block_dataremainder;
         }
 
-        struct ResponseCodes responsecodes = curl_writebytes_block_retry(token, storageaccount, containername, blobname, blockids[iblock], data+block_firstbyte, _block_datasize, nretry, verbose);
+        struct ResponseCodes responsecodes = curl_writebytes_block_retry(token, storageaccount, containername, blobname, blockids[iblock], data+block_firstbyte, _block_datasize, nretry, verbose, connect_timeout, read_timeout);
         thread_responsecode_http[threadid] = MAX(responsecodes.http, thread_responsecode_http[threadid]);
         thread_responsecode_curl[threadid] = MAX(responsecodes.curl, thread_responsecode_curl[threadid]);
     }
@@ -653,7 +730,9 @@ curl_readbytes(
         char   *data,
         size_t  dataoffset,
         size_t  datasize,
-        int     verbose)
+        int     verbose,
+        long    connect_timeout,
+        long    read_timeout)
 {
     char authorization[BUFFER_SIZE];
     curl_authorization(token, authorization);
@@ -674,6 +753,12 @@ curl_readbytes(
     struct HeaderStruct header_data;
     header_data.retry_after = 0;
 
+    struct ProgressStruct progressstruct;
+    progressstruct.start_time = (unsigned long)time(NULL);
+    progressstruct.read_timeout = read_timeout;
+    progressstruct.dlprev = 0;
+    progressstruct.ulprev = 0;
+
     CURL *curlhandle = curl_easy_init();
 
     char url[BUFFER_SIZE];
@@ -688,12 +773,16 @@ curl_readbytes(
     curl_easy_setopt(curlhandle, CURLOPT_URL, url);
     curl_easy_setopt(curlhandle, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curlhandle, CURLOPT_SSL_VERIFYPEER, 0); /* TODO */
-    curl_easy_setopt(curlhandle, CURLOPT_TIMEOUT, CURLE_TIMEOUT);
     curl_easy_setopt(curlhandle, CURLOPT_VERBOSE, verbose);
     curl_easy_setopt(curlhandle, CURLOPT_WRITEFUNCTION, write_callback_readdata);
     curl_easy_setopt(curlhandle, CURLOPT_WRITEDATA, (void*)&datastruct);
     curl_easy_setopt(curlhandle, CURLOPT_HEADERFUNCTION, callback_retry_after_header);
     curl_easy_setopt(curlhandle, CURLOPT_HEADERDATA, &header_data);
+    curl_easy_setopt(curlhandle, CURLOPT_TIMEOUT, CURLE_TIMEOUT);
+    curl_easy_setopt(curlhandle, CURLOPT_CONNECTTIMEOUT, connect_timeout);
+    curl_easy_setopt(curlhandle, CURLOPT_NOPROGRESS, 0);
+    curl_easy_setopt(curlhandle, CURLOPT_XFERINFODATA, &progressstruct);
+    curl_easy_setopt(curlhandle, CURLOPT_XFERINFOFUNCTION, progress_callback);
 
     char errbuf[CURL_ERROR_SIZE];
     curl_easy_setopt(curlhandle, CURLOPT_ERRORBUFFER, errbuf);
@@ -727,12 +816,14 @@ curl_readbytes_retry(
         size_t  dataoffset,
         size_t  datasize,
         int     nretry,
-        int     verbose)
+        int     verbose,
+        long    connect_timeout,
+        long    read_timeout)
 {
     struct ResponseCodes responsecodes;
     int iretry;
     for (iretry = 0; iretry < nretry; iretry++) {
-        responsecodes = curl_readbytes(token, storageaccount, containername, blobname, data, dataoffset, datasize, verbose);
+        responsecodes = curl_readbytes(token, storageaccount, containername, blobname, data, dataoffset, datasize, verbose, connect_timeout, read_timeout);
         if (isrestretrycode(responsecodes) == 0) {
             break;
         }
@@ -758,7 +849,9 @@ curl_readbytes_retry_threaded(
         size_t  datasize,
         int     nthreads,
         int     nretry,
-        int     verbose)
+        int     verbose,
+        long    connect_timeout,
+        long    read_timeout)
 {
     size_t thread_datasize = datasize/nthreads;
     size_t thread_dataremainder = datasize%nthreads;
@@ -778,7 +871,7 @@ curl_readbytes_retry_threaded(
         thread_firstbyte += thread_dataremainder;
     }
 
-    struct ResponseCodes responsecodes = curl_readbytes_retry(token, storageaccount, containername, blobname, data+thread_firstbyte, dataoffset+thread_firstbyte, _thread_datasize, nretry, verbose);
+    struct ResponseCodes responsecodes = curl_readbytes_retry(token, storageaccount, containername, blobname, data+thread_firstbyte, dataoffset+thread_firstbyte, _thread_datasize, nretry, verbose, connect_timeout, read_timeout);
     thread_responsecode_http[threadid] = responsecodes.http;
     thread_responsecode_curl[threadid] = responsecodes.curl;
 } /* end pragma omp */
