@@ -1,4 +1,4 @@
-using AbstractStorage, AzSessions, AzStorage, Dates, JSON, Serialization, Test, UUIDs
+using AbstractStorage, AzSessions, AzStorage, AzStorage_jll, Base64, Dates, HTTP, JSON, Serialization, Test, UUIDs
 
 function robust_mkpath(c)
     local _c
@@ -546,7 +546,7 @@ end
 
 @testset "Windows, single thread check" begin
     r = uuid4()
-    container = AzContainer("foo-$r.o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    container = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     if Sys.iswindows()
         @test container.nthreads == 1
     else
@@ -556,7 +556,69 @@ end
 
 @testset "timeouts" begin
     r = uuid4()
-    c = AzContainer("foo-$r.o", storageaccount=storageaccount, session=session, nretry=0, connect_timeout=2, read_timeout=3)
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nretry=0, connect_timeout=2, read_timeout=3)
     @test c.connect_timeout == 2
     @test c.read_timeout == 3
+end
+
+@testset "C token refresh, write" begin
+    r = uuid4()
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=4, connect_timeout=2, read_timeout=3)
+    c = robust_mkpath(c)
+    o = "foo.bin"
+
+    nthreads = c.nthreads
+
+    N = round(Int, AzStorage._MINBYTES_PER_BLOCK * nthreads * 5)
+    data = rand(UInt8, N)
+
+    _nblocks = AzStorage.nblocks(nthreads, length(data))
+
+    l = ceil(Int, log10(_nblocks))
+    blockids = [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
+    _blockids = [HTTP.escapeuri(blockid) for blockid in blockids]
+    t = token(c.session; offset=Minute(10))
+
+    c.session.expiry = now() # force a token refresh in the C code
+
+    refresh_token,expiry,scope,resource,tenant,clientid,client_secret = AzStorage.authinfo(c.session)
+    r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(t::Cstring, refresh_token::Cstring, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
+        clientid::Cstring, client_secret::Cstring,c.storageaccount::Cstring, c.containername::Cstring, AzStorage.addprefix(c,o)::Cstring, _blockids::Ptr{Cstring}, data::Ptr{UInt8},
+        length(data)::Csize_t, c.nthreads::Cint, _nblocks::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::AzStorage.ResponseCodes
+
+    AzStorage.putblocklist(c, o, blockids)
+
+    _data = read!(c, o, Vector{UInt8}(undef, N))
+    @test data ≈ _data
+end
+
+@testset "C token refresh, read" begin
+    r = uuid4()
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=4, connect_timeout=2, read_timeout=3)
+    c = robust_mkpath(c)
+    o = "foo.bin"
+
+    nthreads = c.nthreads
+
+    N = round(Int, AzStorage._MINBYTES_PER_BLOCK * nthreads * 5)
+    data = rand(UInt8, N)
+
+    write(c, o, data)
+
+    t = token(c.session; offset=Minute(10))
+
+    _nthreads = AzStorage.nthreads_effective(c.nthreads, length(data))
+    offset = 0
+
+    c.session.expiry = now()
+
+    refresh_token,expiry,scope,resource,tenant,clientid,client_secret = AzStorage.authinfo(c.session)
+
+    _data = Vector{UInt8}(undef, N)
+
+    r = @ccall libAzStorage.curl_readbytes_retry_threaded(t::Cstring, refresh_token::Cstring, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
+        clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, AzStorage.addprefix(c,o)::Cstring, _data::Ptr{UInt8}, offset::Csize_t,
+        length(data)::Csize_t, _nthreads::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::AzStorage.ResponseCodes
+
+    @test data ≈ _data
 end

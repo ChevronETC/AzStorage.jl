@@ -70,34 +70,48 @@ curl_authorization(
 
 struct ResponseCodes
 curl_writebytes_block_retry_threaded(
-    char  *token,
-    char  *storageaccount,
-    char  *containername,
-    char  *blobname,
-    char **blockids,
-    char  *data,
-    size_t datasize,
-    int    nthreads,
-    int    nblocks,
-    int    nretry,
-    int    verbose,
-    long   connect_timeout,
-    long   read_timeout);
+    char           *token,
+    char           *refresh_token,
+    unsigned long  *expiry,
+    char           *scope,
+    char           *tenant,
+    char           *resource,
+    char           *clientid,
+    char           *client_secret,
+    char           *storageaccount,
+    char           *containername,
+    char           *blobname,
+    char          **blockids,
+    char           *data,
+    size_t          datasize,
+    int             nthreads,
+    int             nblocks,
+    int             nretry,
+    int             verbose,
+    long            connect_timeout,
+    long            read_timeout);
 
 struct ResponseCodes
 curl_readbytes_retry_threaded(
-    char  *token,
-    char  *storageaccount,
-    char  *containername,
-    char  *blobname,
-    char  *data,
-    size_t dataoffset,
-    size_t datasize,
-    int    nthreads,
-    int    nretry,
-    int    verbose,
-    long   connect_timeout,
-    long   read_timeout);
+    char          *token,
+    char          *refresh_token,
+    unsigned long *expiry,
+    char          *scope,
+    char          *tenant,
+    char          *resource,
+    char          *clientid,
+    char          *client_secret,
+    char          *storageaccount,
+    char          *containername,
+    char          *blobname,
+    char          *data,
+    size_t         dataoffset,
+    size_t         datasize,
+    int            nthreads,
+    int            nretry,
+    int            verbose,
+    long           connect_timeout,
+    long           read_timeout);
 
 struct ResponseCodes
 curl_refresh_tokens_retry(

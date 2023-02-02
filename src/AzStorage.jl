@@ -207,6 +207,39 @@ macro retry(retries, ex::Expr)
     end
 end
 
+function authinfo(session::AzSessions.AzClientCredentialsSession)
+    refresh_token = C_NULL
+    expiry = [floor(UInt64, datetime2unix(session.expiry))]
+    scope = C_NULL
+    resource = session.resource
+    tenant = session.tenant
+    clientid = session.client_id
+    client_secret = session.client_secret
+    refresh_token,expiry,scope,resource,tenant,clientid,client_secret
+end
+
+function authinfo(session::Union{AzSessions.AzDeviceCodeFlowSession,AzSessions.AzAuthCodeFlowSession})
+    refresh_token = session.refresh_token
+    expiry = [floor(UInt64, datetime2unix(session.expiry))]
+    scope = session.scope
+    resource = AzSessions.audience_from_scope(session.scope)
+    tenant = session.tenant
+    clientid = session.client_id
+    client_secret = C_NULL
+    refresh_token,expiry,scope,resource,tenant,clientid,client_secret
+end
+
+function authinfo(session::AzSessions.AzVMSession)
+    refresh_token = C_NULL
+    expiry = [floor(UInt64, datetime2unix(session.expiry))]
+    scope = C_NULL
+    resource = session.resource
+    tenant = C_NULL
+    clientid = C_NULL
+    client_secret = C_NULL
+    refresh_token,expiry,scope,resource,tenant,clientid,client_secret
+end
+
 """
     mkpath(container)
 
@@ -249,64 +282,66 @@ _normpath(s) = Sys.iswindows() ? replace(normpath(s), "\\"=>"/") : normpath(s)
 
 addprefix(c::AzContainer, o) = c.prefix == "" ? o : _normpath("$(c.prefix)/$o")
 
+function writebytes_blob(c, o, data, contenttype)
+    @retry c.nretry HTTP.request(
+        "PUT",
+        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
+        [
+            "Authorization" => "Bearer $(token(c.session))",
+            "x-ms-version" => API_VERSION,
+            "Content-Length" => "$(length(data))",
+            "Content-Type" => contenttype,
+            "x-ms-blob-type" => "BlockBlob"
+        ],
+        data,
+        retry = false,
+        verbose = c.verbose,
+        connect_timeout = c.connect_timeout,
+        readtimeout = c.read_timeout)
+    nothing
+end
+
+function putblocklist(c, o, blockids)
+    xdoc = XMLDocument()
+    xroot = create_root(xdoc, "BlockList")
+    for blockid in blockids
+        add_text(new_child(xroot, "Uncommitted"), blockid)
+    end
+    blocklist = string(xdoc)
+
+    @retry c.nretry HTTP.request(
+        "PUT",
+        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=blocklist",
+        [
+            "x-ms-version" => API_VERSION,
+            "Authorization" => "Bearer $(token(c.session))",
+            "Content-Type" => "application/octet-stream",
+            "Content-Length" => "$(length(blocklist))"
+        ],
+        blocklist,
+        retry = false,
+        verbose = c.verbose,
+        connect_timeout = c.connect_timeout,
+        readtimeout = c.read_timeout)
+    nothing
+end
+
+function writebytes_block(c, o, data, _nblocks)
+    # heuristic to increase probability that token is valid during the retry logic in AzSessions.c
+    l = ceil(Int, log10(_nblocks))
+    blockids = [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
+    _blockids = [HTTP.escapeuri(blockid) for blockid in blockids]
+    t = token(c.session; offset=Minute(10))
+    refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
+    r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(t::Cstring, refresh_token::Cstring, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
+        clientid::Cstring, client_secret::Cstring,c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, _blockids::Ptr{Cstring}, data::Ptr{UInt8},
+        length(data)::Csize_t, c.nthreads::Cint, _nblocks::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::ResponseCodes
+    (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
+
+    putblocklist(c, o, blockids)
+end
+
 function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; contenttype="application/octet-stream")
-    function writebytes_blob(c, o, data, contenttype)
-        @retry c.nretry HTTP.request(
-            "PUT",
-            "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
-            [
-                "Authorization" => "Bearer $(token(c.session))",
-                "x-ms-version" => API_VERSION,
-                "Content-Length" => "$(length(data))",
-                "Content-Type" => contenttype,
-                "x-ms-blob-type" => "BlockBlob"
-            ],
-            data,
-            retry = false,
-            verbose = c.verbose,
-            connect_timeout = c.connect_timeout,
-            readtimeout = c.read_timeout)
-        nothing
-    end
-
-    function putblocklist(c, o, blockids)
-        xdoc = XMLDocument()
-        xroot = create_root(xdoc, "BlockList")
-        for blockid in blockids
-            add_text(new_child(xroot, "Uncommitted"), blockid)
-        end
-        blocklist = string(xdoc)
-
-        @retry c.nretry HTTP.request(
-            "PUT",
-            "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=blocklist",
-            [
-                "x-ms-version" => API_VERSION,
-                "Authorization" => "Bearer $(token(c.session))",
-                "Content-Type" => "application/octet-stream",
-                "Content-Length" => "$(length(blocklist))"
-            ],
-            blocklist,
-            retry = false,
-            verbose = c.verbose,
-            connect_timeout = c.connect_timeout,
-            readtimeout = c.read_timeout)
-        nothing
-    end
-
-    function writebytes_block(c, o, data, _nblocks)
-        # heuristic to increase probability that token is valid during the retry logic in AzSessions.c
-        t = token(c.session; offset=Minute(30))
-        l = ceil(Int, log10(_nblocks))
-        blockids = [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
-        _blockids = [HTTP.escapeuri(blockid) for blockid in blockids]
-        r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(t::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, _blockids::Ptr{Cstring},
-            data::Ptr{UInt8}, length(data)::Csize_t, c.nthreads::Cint, _nblocks::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::ResponseCodes
-        (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
-
-        putblocklist(c, o, blockids)
-    end
-
     _nblocks = nblocks(c.nthreads, length(data))
     if Sys.iswindows()
         writebytes_blob(c, o, data, contenttype)
@@ -487,10 +522,11 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
 
     function readbytes_threaded!(c, o, data, offset, _nthreads)
         # heuristic to increase probability that token is valid during the retry logic in AzSessions.c
-        t = token(c.session; offset=Minute(30))
-        r = @ccall libAzStorage.curl_readbytes_retry_threaded(t::Cstring, c.storageaccount::Cstring, c.containername::Cstring,
-                addprefix(c,o)::Cstring, data::Ptr{UInt8}, offset::Csize_t, length(data)::Csize_t, _nthreads::Cint, c.nretry::Cint,
-                c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::ResponseCodes
+        t = token(c.session; offset=Minute(10))
+        refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
+        r = @ccall libAzStorage.curl_readbytes_retry_threaded(t::Cstring, refresh_token::Cstring, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
+            clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, data::Ptr{UInt8}, offset::Csize_t,
+            length(data)::Csize_t, _nthreads::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::ResponseCodes
         (r.http >= 300 || r.curl > 0) && error("readbytes_threaded! error: http code $(r.http), curl code $(r.curl)")
         nothing
     end
