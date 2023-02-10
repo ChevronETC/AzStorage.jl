@@ -188,25 +188,36 @@ update_tokens_from_refresh_token(
 {
     char *_data = data;
     char expiry_string[BUFFER_SIZE];
-    int counter = 0;
-    while (counter < strlen(data)) {
-        if (strncmp(_data, "\"access_token\"", 14) == 0) {
-            counter += 14;
-            _data += 14;
-            get_next_quoted_string(_data, bearer_token);
-        } else if (strncmp(_data, "\"refresh_token\"", 15) == 0) {
-            counter += 15;
-            _data += 15;
-            get_next_quoted_string(_data, refresh_token);
-        } else if (strncmp(_data, "\"expires_on\"", 12) == 0) {
-            counter += 12;
-            _data += 12;
-            get_next_quoted_string(_data, expiry_string);
-            sscanf(expiry_string, "%lu", expiry);
-        } else {
-            counter += 1;
-            _data += 1;
+    size_t counter = 0;
+    size_t n = strlen(data);
+    while (counter < n) {
+        if (counter+13 < n) {
+            if (strncmp(_data, "\"access_token\"", 14) == 0) {
+                counter += 14;
+                _data += 14;
+                get_next_quoted_string(_data, bearer_token);
+                continue;
+            }
         }
+        if (counter+14 < n) {
+            if (strncmp(_data, "\"refresh_token\"", 15) == 0) {
+                counter += 15;
+                _data += 15;
+                get_next_quoted_string(_data, refresh_token);
+                continue;
+            }
+        }
+        if (counter+11 < n) {
+            if (strncmp(_data, "\"expires_on\"", 12) == 0) {
+                counter += 12;
+                _data += 12;
+                get_next_quoted_string(_data, expiry_string);
+                sscanf(expiry_string, "%lu", expiry);
+                continue;
+            }
+        }
+        counter += 1;
+        _data += 1;
     }
 }
 
@@ -348,21 +359,28 @@ update_tokens_from_client_secret(
 {
     char *_data = data;
     char expiry_string[BUFFER_SIZE];
-    int counter = 0;
-    while (counter < strlen(data)) {
-        if (strncmp(_data, "\"access_token\"", 14) == 0) {
-            counter += 14;
-            _data += 14;
-            get_next_quoted_string(_data, bearer_token);
-        } else if (strncmp(_data, "\"expires_on\"", 12) == 0) {
-            counter += 12;
-            _data += 12;
-            get_next_quoted_string(_data, expiry_string);
-            sscanf(expiry_string, "%lu", expiry);
-        } else {
-            counter += 1;
-            _data += 1;
+    size_t counter = 0;
+    size_t n = strlen(data);
+    while (counter < n) {
+        if (counter+13 < n) {
+            if (strncmp(_data, "\"access_token\"", 14) == 0) {
+                counter += 14;
+                _data += 14;
+                get_next_quoted_string(_data, bearer_token);
+                continue;
+            }
         }
+        if (counter+11 < n) {
+            if (strncmp(_data, "\"expires_on\"", 12) == 0) {
+                counter += 12;
+                _data += 12;
+                get_next_quoted_string(_data, expiry_string);
+                sscanf(expiry_string, "%lu", expiry);
+                continue;
+            }
+        }
+        counter += 1;
+        _data += 1;
     }
 }
 
