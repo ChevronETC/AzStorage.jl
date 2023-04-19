@@ -1,6 +1,6 @@
 module AzStorage
 
-using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles, HTTP, LightXML, Serialization, Sockets
+using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles, EzXML, HTTP, Serialization, Sockets
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
 # https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/request-limits-and-throttling
@@ -331,11 +331,12 @@ function writebytes_blob(c, o, data, contenttype)
 end
 
 function putblocklist(c, o, blockids)
-    xdoc = XMLDocument()
-    xroot = create_root(xdoc, "BlockList")
+    xroot = ElementNode("BlockList")
     for blockid in blockids
-        add_text(new_child(xroot, "Uncommitted"), blockid)
+        link!(xroot, setnodecontent!(ElementNode("Uncommitted"), blockid))
     end
+    xdoc = XMLDocument()
+    setroot!(xdoc, xroot)
     blocklist = string(xdoc)
 
     @retry c.nretry HTTP.request(
@@ -736,16 +737,25 @@ function Base.readdir(c::AzContainer; filterlist=true)
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
             readtimeout = c.read_timeout)
-        xroot = root(parse_string(String(r.body)))
-        blobs = xroot["Blobs"][1]["Blob"]
-        _names = [content(blob["Name"][1]) for blob in blobs]
-        if filterlist && c.prefix != ""
-            _names = replace.(_names, _normpath(c.prefix*"/")=>"")
+
+        xroot = root(parsexml(String(r.body)))
+        for node in eachelement(xroot)
+            if nodename(node) == "Blobs"
+                for _node in eachelement(node)
+                    name = nodecontent(firstnode(_node))
+                    if filterlist
+                        push!(names, replace(name, _normpath(c.prefix*"/")=>""))
+                    else
+                        push!(names, name)
+                    end
+                end
+            elseif nodename(node) == "NextMarker"
+                marker = nodecontent(node)
+            end
         end
-        names = [names; _names]
-        marker = content(xroot["NextMarker"][1])
         marker == "" && break
     end
+
     names
 end
 
@@ -838,7 +848,7 @@ list all containers in a given storage account.
 """
 function containers(;storageaccount, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nretry=5, verbose=0, connect_timeout=30, read_timeout=10)
     marker = ""
-    names = String[]
+    containernames = String[]
     while true
         r = @retry nretry HTTP.request(
             "GET",
@@ -851,13 +861,26 @@ function containers(;storageaccount, session=AzSession(;lazy=false, scope=__OAUT
             verbose = verbose,
             connect_timeout = connect_timeout,
             readtimeout = read_timeout)
-        xroot = root(parse_string(String(r.body)))
-        containers = xroot["Containers"][1]["Container"]
-        names = [names; [content(container["Name"][1]) for container in containers]]
-        marker = content(xroot["NextMarker"][1])
+
+        xroot = root(parsexml(String(r.body)))
+        for node in eachelement(xroot)
+            if nodename(node) == "Containers"
+                for _node in eachelement(node)
+                    for __node in eachelement(_node)
+                        if nodename(__node) == "Name"
+                            push!(containernames, nodecontent(__node))
+                            break
+                        end
+                    end
+                end
+            elseif nodename(node) == "NextMarker"
+                marker = nodecontent(node)
+            end
+        end
+
         marker == "" && break
     end
-    names
+    containernames
 end
 
 """
