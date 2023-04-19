@@ -723,10 +723,11 @@ list of objects in a container.
 function Base.readdir(c::AzContainer; filterlist=true)
     marker = ""
     names = String[]
+    prefix = filterlist ? c.prefix : ""
     while true
         r = @retry c.nretry HTTP.request(
             "GET",
-            "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)?restype=container&comp=list&marker=$marker",
+            "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)?restype=container&comp=list&prefix=$prefix&marker=$marker",
             [
                 "Authorization" => "Bearer $(token(c.session))",
                 "x-ms-version" => API_VERSION
@@ -739,7 +740,7 @@ function Base.readdir(c::AzContainer; filterlist=true)
         blobs = xroot["Blobs"][1]["Blob"]
         _names = [content(blob["Name"][1]) for blob in blobs]
         if filterlist && c.prefix != ""
-            _names = replace.(filter(_name->startswith(_name, c.prefix), _names), _normpath(c.prefix*"/")=>"")
+            _names = replace.(_names, _normpath(c.prefix*"/")=>"")
         end
         names = [names; _names]
         marker = content(xroot["NextMarker"][1])
