@@ -968,7 +968,7 @@ curl_readbytes_retry_threaded(
 // #pragma omp parallel num_threads(nthreads)
 // {
     // int threadid = omp_get_thread_num();
-    threadid=0;
+    int threadid=0;
     size_t thread_firstbyte = threadid*thread_datasize;
     size_t _thread_datasize = thread_datasize;
     if (threadid < thread_dataremainder) {
