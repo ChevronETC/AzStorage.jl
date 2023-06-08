@@ -987,7 +987,7 @@ curl_readbytes_retry_threaded(
 
     long responsecode_http = 200;
     long responsecode_curl = (long)CURLE_OK;
-    int threadid;
+    // int threadid;
     for (threadid = 0; threadid < nthreads; threadid++) {
         responsecode_http = MAX(responsecode_http, thread_responsecode_http[threadid]);
         responsecode_curl = MAX(responsecode_curl, thread_responsecode_curl[threadid]);
