@@ -992,7 +992,7 @@ curl_readbytes_retry_threaded(
         responsecode_http = MAX(responsecode_http, thread_responsecode_http[threadid]);
         responsecode_curl = MAX(responsecode_curl, thread_responsecode_curl[threadid]);
     }
-    struct ResponseCodes responsecodes;
+    // struct ResponseCodes responsecodes;
     responsecodes.http = responsecode_http;
     responsecodes.curl = responsecode_curl;
 
