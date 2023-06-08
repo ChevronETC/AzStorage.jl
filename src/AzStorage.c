@@ -965,10 +965,9 @@ curl_readbytes_retry_threaded(
     omp_lock_t token_lock;
     omp_init_lock(&token_lock);
 
-// #pragma omp parallel num_threads(nthreads)
-// {
-    // int threadid = omp_get_thread_num();
-    int threadid=0;
+#pragma omp parallel num_threads(nthreads)
+{
+    int threadid = omp_get_thread_num();
     size_t thread_firstbyte = threadid*thread_datasize;
     size_t _thread_datasize = thread_datasize;
     if (threadid < thread_dataremainder) {
@@ -981,18 +980,18 @@ curl_readbytes_retry_threaded(
     struct ResponseCodes responsecodes = curl_readbytes_retry(&token_lock, token, refresh_token, expiry, scope, resource, tenant, clientid, client_secret, storageaccount, containername, blobname, data+thread_firstbyte, dataoffset+thread_firstbyte, _thread_datasize, nretry, verbose, connect_timeout, read_timeout);
     thread_responsecode_http[threadid] = responsecodes.http;
     thread_responsecode_curl[threadid] = responsecodes.curl;
-// } /* end pragma omp */
+} /* end pragma omp */
 
     omp_destroy_lock(&token_lock);
 
     long responsecode_http = 200;
     long responsecode_curl = (long)CURLE_OK;
-    // int threadid;
+    int threadid;
     for (threadid = 0; threadid < nthreads; threadid++) {
         responsecode_http = MAX(responsecode_http, thread_responsecode_http[threadid]);
         responsecode_curl = MAX(responsecode_curl, thread_responsecode_curl[threadid]);
     }
-    // struct ResponseCodes responsecodes;
+    struct ResponseCodes responsecodes;
     responsecodes.http = responsecode_http;
     responsecodes.curl = responsecode_curl;
 
