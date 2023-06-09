@@ -979,8 +979,8 @@ curl_readbytes_retry_threaded(
     }
 
     struct ResponseCodes responsecodes = curl_readbytes_retry(&token_lock, token, refresh_token, expiry, scope, resource, tenant, clientid, client_secret, storageaccount, containername, blobname, data+thread_firstbyte, dataoffset+thread_firstbyte, _thread_datasize, nretry, verbose, connect_timeout, read_timeout);
-    thread_responsecode_http[threadid] = responsecodes.http;
-    thread_responsecode_curl[threadid] = responsecodes.curl;
+    // thread_responsecode_http[threadid] = responsecodes.http;
+    // thread_responsecode_curl[threadid] = responsecodes.curl;
 } /* end pragma omp */
 
     omp_destroy_lock(&token_lock);
