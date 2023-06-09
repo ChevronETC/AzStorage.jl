@@ -969,14 +969,15 @@ curl_readbytes_retry_threaded(
 {
     int threadid = omp_get_thread_num();
     size_t thread_firstbyte = threadid*thread_datasize;
-    // size_t _thread_datasize = thread_datasize;
-    size_t _thread_datasize = 10000;
+    size_t _thread_datasize = thread_datasize;
     if (threadid < thread_dataremainder) {
         thread_firstbyte += threadid;
         _thread_datasize += 1;
     } else {
         thread_firstbyte += thread_dataremainder;
     }
+
+    int __nthreads = nthreads;
 
     struct ResponseCodes responsecodes = curl_readbytes_retry(&token_lock, token, refresh_token, expiry, scope, resource, tenant, clientid, client_secret, storageaccount, containername, blobname, data+thread_firstbyte, dataoffset+thread_firstbyte, _thread_datasize, nretry, verbose, connect_timeout, read_timeout);
     // thread_responsecode_http[threadid] = responsecodes.http;
