@@ -34,6 +34,13 @@ struct HeaderStruct {
     int retry_after;
 };
 
+struct PerfCounters {
+    long long msWaitThrottled;
+    long long msWaitTimeout;
+    long long countThrottled;
+    long long countTimeouts;
+};
+
 char*
 api_header();
 
@@ -132,5 +139,15 @@ curl_refresh_tokens_retry(
 int
 isrestretrycode(
     struct ResponseCodes responsecodes);
+
+void 
+resetPerfCounters(
+    void
+);
+
+struct PerfCounters
+getPerfCounters(
+    void
+);
 
 #endif
