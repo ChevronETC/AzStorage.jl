@@ -54,6 +54,8 @@ end
 @info "sleeping for 60 seconds to ensure Azure clean-up from any previous run"
 sleep(60)
 
+@ccall AzStorage.libAzStorage.resetPerfCounters()::Cvoid
+
 @testset "Error codes" begin
     @test unsafe_load(cglobal((:N_HTTP_RETRY_CODES, AzStorage.libAzStorage), Cint)) == 3
     x = Sys.iswindows() ? unsafe_load(cglobal((:HTTP_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clonglong})) : unsafe_load(cglobal((:HTTP_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
@@ -629,4 +631,8 @@ if !Sys.iswindows()
 
         @test data ≈ _data
     end
+
+    r = @ccall AzStorage.libAzStorage.getPerfCounters()::AzStorage.PerfCounters
+    @info "Throttled events=$r.countThrottled"
+
 end

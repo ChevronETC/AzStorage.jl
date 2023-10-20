@@ -35,7 +35,7 @@ exponential_backoff(
 
     omp_set_lock(&perfLock);
     perfCounters.countThrottled += 1;
-    perfCounters.msWaitThrottled += sleeptime_seconds * 1000 + floor(sleeptime_nanoseconds * 1000000.0);
+    perfCounters.msWaitThrottled += sleeptime_seconds * 1000 + floor(sleeptime_nanoseconds / 1000000.0);
     omp_unset_lock(&perfLock);
 
     return nanosleep(&ts_sleeptime, &ts_remainingtime);

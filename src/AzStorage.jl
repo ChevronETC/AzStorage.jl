@@ -1012,6 +1012,13 @@ function Base.cp(src::AzContainer, dst::AzContainer)
     nothing
 end
 
+struct PerfCounters
+    msWaitThrottled::Clonglong
+    msWaitTimeout::Clonglong
+    countThrottled::Clonglong
+    countTimeouts::Clonglong
+end
+
 export AzContainer, containers, readdlm, writedlm
 
 end
