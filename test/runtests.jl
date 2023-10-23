@@ -633,6 +633,6 @@ if !Sys.iswindows()
     end
 
     r = @ccall AzStorage.libAzStorage.getPerfCounters()::AzStorage.PerfCounters
-    @info "Throttled events=$r.countThrottled"
+    @info "Throttled events = $(r.countThrottled), Throttled ms wait: = $(r.msWaitThrottled)"
 
 end

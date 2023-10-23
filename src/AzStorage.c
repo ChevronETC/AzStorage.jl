@@ -58,6 +58,8 @@ curl_init(
     snprintf(API_HEADER, API_HEADER_BUFFER_SIZE, "x-ms-version: %s", api_version);
 
     curl_global_init(CURL_GLOBAL_ALL);
+
+    omp_init_lock(&perfLock);
 }
 
 /*
@@ -1013,12 +1015,11 @@ resetPerfCounters(
     void
 )
 {
-    omp_init_lock(&perfLock);
     omp_set_lock(&perfLock);
     perfCounters.countThrottled = 0;
     perfCounters.countTimeouts = 0;
     perfCounters.msWaitThrottled = 0;
-    perfCounters.msWaitTimeout;
+    perfCounters.msWaitTimeout = 0;
     omp_unset_lock(&perfLock);
 }
 
