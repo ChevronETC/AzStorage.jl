@@ -35,10 +35,10 @@ struct HeaderStruct {
 };
 
 struct PerfCounters {
-    long long msWaitThrottled;
-    long long msWaitTimeout;
-    long long countThrottled;
-    long long countTimeouts;
+    long long ms_wait_throttled;
+    long long ms_wait_timeout;
+    long long count_throttled;
+    long long count_timeouts;
 };
 
 char*
@@ -141,11 +141,9 @@ isrestretrycode(
     struct ResponseCodes responsecodes);
 
 void 
-resetPerfCounters(
-);
+resetPerfCounters();
 
 struct PerfCounters
-getPerfCounters(
-);
+getPerfCounters();
 
 #endif
