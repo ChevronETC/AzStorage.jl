@@ -142,12 +142,10 @@ isrestretrycode(
 
 void 
 resetPerfCounters(
-    void
 );
 
 struct PerfCounters
 getPerfCounters(
-    void
 );
 
 #endif

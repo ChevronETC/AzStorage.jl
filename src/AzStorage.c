@@ -1012,7 +1012,6 @@ curl_readbytes_retry_threaded(
 
 void 
 resetPerfCounters(
-    void
 )
 {
     omp_set_lock(&perfLock);
@@ -1025,7 +1024,6 @@ resetPerfCounters(
 
 struct PerfCounters
 getPerfCounters(
-    void
 )
 {
     struct PerfCounters pc;
