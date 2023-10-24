@@ -1018,7 +1018,7 @@ resetperf_counters(
     perf_counters.count_throttled = 0;
     perf_counters.count_timeouts = 0;
     perf_counters.ms_wait_throttled = 0;
-    perf_counters.ms_wait_timeout = 0;
+    perf_counters.ms_wait_timeouts = 0;
     omp_unset_lock(&perf_lock);
 }
 

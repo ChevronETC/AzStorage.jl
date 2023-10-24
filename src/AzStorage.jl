@@ -27,6 +27,7 @@ const BUFFER_SIZE = unsafe_load(cglobal((:BUFFER_SIZE, libAzStorage), Int32))
 
 function __init__()
     @ccall libAzStorage.curl_init(length(RETRYABLE_HTTP_ERRORS)::Cint, length(RETRYABLE_CURL_ERRORS)::Cint, RETRYABLE_HTTP_ERRORS::Ptr{Clong}, RETRYABLE_CURL_ERRORS::Ptr{Clong}, API_VERSION::Cstring)::Cvoid
+    resetperf_counters()
 end
 
 mutable struct AzContainer{A<:AzSessionAbstract} <: Container
@@ -1014,10 +1015,33 @@ end
 
 struct PerfCounters
     ms_wait_throttled::Clonglong
-    ms_wait_tmeout::Clonglong
+    ms_wait_timeouts::Clonglong
     count_throttled::Clonglong
     count_timeouts::Clonglong
 end
+
+"""
+    AzStorage.resetperf_counters()
+
+Reset the performance counters to zero.  Please see the `AzStorage.getperf_counters()` documentation for
+more information.
+"""
+resetperf_counters() = @ccall libAzStorage.resetperf_counters()::Cvoid
+
+"""
+    performance_counters = AzStorage.getperf_counters()
+
+IO operations performed via the AzStorage package are monitored for client-side timeouts and service throttling.
+In particular, `performance_counters` will store the following information:
+
+* `performance_counters.ms_wait_throttled` is the time in milliseconds that IO was delayed due to service throttling.
+* `performance_counters.ms_wait_timeouts` is the time in milliseconds that IO was delayed due to client-side time-outs caused by an unresponsive Azure service.
+* `performance_counters.count_throttled` is a count of the total number of times that the service throttles requests.
+* `performance_counters.count_timeouts` is a count of the total number of times that the service was unresponsive, causing client-side time-outs.
+
+Note that the information stored is global, and not specfic to any one given IO operation.  See `AzStorage.reset_perf_counters()`.
+"""
+getperf_counters() = @ccall libAzStorage.getperf_counters()::PerfCounters
 
 export AzContainer, containers, readdlm, writedlm
 
