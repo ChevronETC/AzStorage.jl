@@ -5,6 +5,8 @@ int N_CURL_RETRY_CODES = 0;
 long *HTTP_RETRY_CODES = NULL;
 long *CURL_RETRY_CODES = NULL;
 char API_HEADER[API_HEADER_BUFFER_SIZE];
+omp_lock_t perf_lock;
+struct PerfCounters perf_counters;
 
 char*
 api_header() {
@@ -31,6 +33,11 @@ exponential_backoff(
     ts_sleeptime.tv_sec = (long)sleeptime_seconds;
     ts_sleeptime.tv_nsec = (long)sleeptime_nanoseconds;
 
+    omp_set_lock(&perf_lock);
+    perf_counters.count_throttled += 1;
+    perf_counters.ms_wait_throttled += sleeptime_seconds * 1000 + floor(sleeptime_nanoseconds / 1000000.0);
+    omp_unset_lock(&perf_lock);
+
     return nanosleep(&ts_sleeptime, &ts_remainingtime);
 }
 
@@ -51,6 +58,8 @@ curl_init(
     snprintf(API_HEADER, API_HEADER_BUFFER_SIZE, "x-ms-version: %s", api_version);
 
     curl_global_init(CURL_GLOBAL_ALL);
+
+    omp_init_lock(&perf_lock);
 }
 
 /*
@@ -243,6 +252,9 @@ progress_callback(
     curl_off_t uldelta = ulnow - progressstruct->ulprev;
 
     if ( (dldelta == 0 && elapsed_time >= progressstruct->read_timeout) || (uldelta == 0 && elapsed_time >= progressstruct->read_timeout) ) {
+        omp_set_lock(&perf_lock);
+        perf_counters.count_timeouts += 1;
+        omp_unset_lock(&perf_lock);
         return 1;
     }
     if (dldelta > 0 || uldelta > 0) {
@@ -996,4 +1008,27 @@ curl_readbytes_retry_threaded(
     responsecodes.curl = responsecode_curl;
 
     return responsecodes;
+}
+
+void 
+resetperf_counters(
+)
+{
+    omp_set_lock(&perf_lock);
+    perf_counters.count_throttled = 0;
+    perf_counters.count_timeouts = 0;
+    perf_counters.ms_wait_throttled = 0;
+    perf_counters.ms_wait_timeouts = 0;
+    omp_unset_lock(&perf_lock);
+}
+
+struct PerfCounters
+getperf_counters(
+)
+{
+    struct PerfCounters pc;
+    omp_set_lock(&perf_lock);
+    pc = perf_counters;
+    omp_unset_lock(&perf_lock);
+    return pc;
 }

@@ -629,4 +629,22 @@ if !Sys.iswindows()
 
         @test data ≈ _data
     end
+
+    @testset "performance counters" begin
+        perfcounters = AzStorage.getperf_counters()
+        @info "Throttled events = $(perfcounters.count_throttled), Throttled ms wait: = $(perfcounters.ms_wait_throttled)"
+
+        @test isa(perfcounters.ms_wait_throttled, Clonglong)
+        @test isa(perfcounters.ms_wait_timeouts, Clonglong)
+        @test isa(perfcounters.count_throttled, Clonglong)
+        @test isa(perfcounters.count_timeouts, Clonglong)
+
+        AzStorage.resetperf_counters()
+        AzStorage.getperf_counters()
+        @test perfcounters.ms_wait_throttled == 0
+        @test perfcounters.ms_wait_timeouts == 0
+        @test perfcounters.count_throttled == 0
+        @test perfcounters.count_timeouts == 0
+    end
+
 end
