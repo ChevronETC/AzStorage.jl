@@ -362,7 +362,7 @@ function writebytes_block(c, o, data, _nblocks)
     l = ceil(Int, log10(_nblocks))
     blockids = [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
     _blockids = [HTTP.escapeuri(blockid) for blockid in blockids]
-    t = token(c.session; offset=Minute(10))
+    t = token(c.session)
     _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
     r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
         clientid::Cstring, client_secret::Cstring,c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, _blockids::Ptr{Cstring}, data::Ptr{UInt8},
@@ -553,7 +553,7 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
 
     function readbytes_threaded!(c, o, data, offset, _nthreads)
         # heuristic to increase probability that token is valid during the retry logic in AzSessions.c
-        t = token(c.session; offset=Minute(10))
+        t = token(c.session)
         _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
         r = @ccall libAzStorage.curl_readbytes_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
             clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, data::Ptr{UInt8}, offset::Csize_t,
