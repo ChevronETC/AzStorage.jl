@@ -1,6 +1,6 @@
 module AzStorage
 
-using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles, EzXML, HTTP, Serialization, Sockets
+using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles, XML, HTTP, Serialization, Sockets
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
 # https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/request-limits-and-throttling
@@ -332,13 +332,12 @@ function writebytes_blob(c, o, data, contenttype)
 end
 
 function putblocklist(c, o, blockids)
-    xroot = ElementNode("BlockList")
+    xroot = XML.Element("BlockList")
     for blockid in blockids
-        link!(xroot, setnodecontent!(ElementNode("Uncommitted"), blockid))
+        push!(xroot, XML.Element("Uncommitted", blockid))
     end
-    xdoc = XMLDocument()
-    setroot!(xdoc, xroot)
-    blocklist = string(xdoc)
+    xdoc = XML.Document(XML.Declaration(version=1.0, encoding="UTF-8"), xroot)
+    blocklist = XML.write(xdoc; indentsize=0)
 
     @retry c.nretry HTTP.request(
         "PUT",
@@ -739,19 +738,24 @@ function Base.readdir(c::AzContainer; filterlist=true)
             connect_timeout = c.connect_timeout,
             readtimeout = c.read_timeout)
 
-        xroot = root(parsexml(String(r.body)))
-        for node in eachelement(xroot)
-            if nodename(node) == "Blobs"
-                for _node in eachelement(node)
-                    name = nodecontent(firstnode(_node))
-                    if filterlist
-                        push!(names, replace(name, _normpath(c.prefix*"/")=>""))
-                    else
-                        push!(names, name)
+        xdoc = XML.parse(LazyNode, String(r.body))
+        for node in children(xdoc)
+            if tag(node) == "EnumerationResults"
+                for _node in children(node)
+                    if tag(_node) == "Blobs"
+                         for __node in children(_node)
+                            name = value(first(children(first(children(__node)))))
+                            if filterlist
+                                push!(names, replace(name, _normpath(c.prefix*"/")=>""))
+                            else
+                                push!(names, name)
+                            end
+                        end
+                    elseif tag(_node) == "NextMarker"
+                       marker = isempty(children(_node)) ? "" : value(first(children(_node)))
                     end
                 end
-            elseif nodename(node) == "NextMarker"
-                marker = nodecontent(node)
+                break
             end
         end
         marker == "" && break
@@ -863,22 +867,26 @@ function containers(;storageaccount, session=AzSession(;lazy=false, scope=__OAUT
             connect_timeout = connect_timeout,
             readtimeout = read_timeout)
 
-        xroot = root(parsexml(String(r.body)))
-        for node in eachelement(xroot)
-            if nodename(node) == "Containers"
-                for _node in eachelement(node)
-                    for __node in eachelement(_node)
-                        if nodename(__node) == "Name"
-                            push!(containernames, nodecontent(__node))
-                            break
+        xdoc = XML.parse(LazyNode, String(r.body))
+        for node in children(xdoc)
+            if tag(node) == "EnumerationResults"
+                for _node in children(node)
+                    if tag(_node) == "Containers"
+                        for __node in children(_node)
+                            for ___node in children(__node)
+                                if tag(___node) == "Name"
+                                    name = value(first(children(___node)))
+                                    push!(containernames, name)
+                                    break
+                                end
+                            end
                         end
+                    elseif tag(_node) == "NextMarker"
+                        marker = isempty(children(_node)) ? "" : value(first(children(_node)))
                     end
                 end
-            elseif nodename(node) == "NextMarker"
-                marker = nodecontent(node)
             end
         end
-
         marker == "" && break
     end
     containernames
