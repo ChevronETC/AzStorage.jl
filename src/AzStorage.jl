@@ -331,6 +331,59 @@ function writebytes_blob(c, o, data, contenttype)
     nothing
 end
 
+function isinvalidblocklist(e)
+    b = XML.parse(String(e.response.body), LazyNode)
+    for child in children(b)
+        if tag(child) == "Error"
+            for grandchild in children(child)
+                if tag(grandchild) == "Code"
+                    if value(first(children(grandchild))) == "InvalidBlockList"
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    false
+end
+
+function committed_blocklist(c, o)
+    r = @retry c.nretry HTTP.request(
+        "GET",
+        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=blocklist",
+        [
+            "x-ms-version" => API_VERSION,
+            "Authorization" => "Bearer $(token(c.session))"
+        ],
+        retry = false,
+        verbose = c.verbose,
+        connect_timeout = c.connect_timeout,
+        readtimeout = c.read_timeout
+    )
+
+    b = XML.parse(String(r.body), LazyNode)
+    committedblocks = String[]
+    for child in children(b)
+        if tag(child) == "BlockList"
+            for grandchild in children(child)
+                if tag(grandchild) == "CommittedBlocks"
+                    for greatgrandchild in children(grandchild)
+                        for greatgreatgrandchild in children(greatgrandchild)
+                            if tag(greatgreatgrandchild) == "Name"
+                                push!(committedblocks, value(first(children(greatgreatgrandchild))))
+                                break
+                            end
+                        end
+                    end
+                end
+                break
+            end
+            break
+        end
+    end
+    committedblocks
+end
+
 function putblocklist(c, o, blockids)
     xroot = XML.Element("BlockList")
     for blockid in blockids
@@ -339,20 +392,34 @@ function putblocklist(c, o, blockids)
     xdoc = XML.Document(XML.Declaration(version=1.0, encoding="UTF-8"), xroot)
     blocklist = XML.write(xdoc; indentsize=0)
 
-    @retry c.nretry HTTP.request(
-        "PUT",
-        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=blocklist",
-        [
-            "x-ms-version" => API_VERSION,
-            "Authorization" => "Bearer $(token(c.session))",
-            "Content-Type" => "application/octet-stream",
-            "Content-Length" => "$(length(blocklist))"
-        ],
-        blocklist,
-        retry = false,
-        verbose = c.verbose,
-        connect_timeout = c.connect_timeout,
-        readtimeout = c.read_timeout)
+    try
+        @retry c.nretry HTTP.request(
+            "PUT",
+            "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=blocklist",
+            [
+                "x-ms-version" => API_VERSION,
+                "Authorization" => "Bearer $(token(c.session))",
+                "Content-Type" => "application/octet-stream",
+                "Content-Length" => "$(length(blocklist))"
+            ],
+            blocklist,
+            retry = false,
+            verbose = c.verbose,
+            connect_timeout = c.connect_timeout,
+            readtimeout = c.read_timeout)
+    catch e
+        isa(e, HTTP.Exceptions.StatusError) || throw(e)
+
+        #=
+        Special handling for 400 errors with "InvalidBlockList" error code.
+        We think there is a race condition that can cause putblocklist to
+        be called twice, and putblocklist is not idempotent.
+        =#
+        (e.response.status == 400 && isinvalidblocklist(e)) || throw(e)
+
+        _blockids = committed_blocklist(c, o)
+        sort(blockids) == sort(_blockids) || throw(e) # do nothing if the blocks were already committed
+    end
     nothing
 end
 

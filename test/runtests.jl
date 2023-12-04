@@ -561,6 +561,26 @@ end
     @test c.read_timeout == 3
 end
 
+@testset "redundant putblocklist" begin
+    #=
+    Test special handling for 400 errors with "InvalidBlockList" error code.
+    We think there is a race condition that can cause putblocklist to
+    be called twice, and putblocklist is not idempotent.
+    =#
+    r = uuid4()
+    x = rand(UInt8, 500_000)
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    write(robust_open(c, "foo.bin"), x)
+
+    _nblocks = AzStorage.nblocks(c.nthreads, length(x))
+    l = ceil(Int, log10(_nblocks))
+    blockids = [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
+    AzStorage.putblocklist(c, "foo.bin", blockids) # simulate the race, by putting the block list again
+    _x = read!(robust_open(c, "foo.bin"), Vector{UInt8}(undef, 500_000))
+    @test _x == x
+    rm(c)
+end
+
 if !Sys.iswindows()
     @testset "C token refresh, write" begin
         r = uuid4()
