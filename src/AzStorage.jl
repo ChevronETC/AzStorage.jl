@@ -861,6 +861,8 @@ end
 
 AbstractStorage.minimaldict(c::AzContainer) = Dict("storageaccount"=>c.storageaccount, "containername"=>c.containername, "prefix"=>c.prefix)
 
+AbstractStorage.backend(_::AzContainer) = "azureblob"
+
 """
     isfile(container, "blobname")
 

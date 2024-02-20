@@ -581,6 +581,14 @@ end
     rm(c)
 end
 
+@testset "backend" begin
+    r = uuid4()
+    x = rand(UInt8, 500_000)
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+
+    @test backend(c) == "azureblob"
+end
+
 if !Sys.iswindows()
     @testset "C token refresh, write" begin
         r = uuid4()
