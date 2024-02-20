@@ -15,7 +15,7 @@ Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 XML = "72c71f33-b9b6-44de-8c94-c961784809e2"
 
 [compat]
-AbstractStorage = "^1.1"
+AbstractStorage = "^1.2"
 AzSessions = "2"
 AzStorage_jll = "0.9"
 HTTP = "1"
