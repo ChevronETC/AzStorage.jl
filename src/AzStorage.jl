@@ -424,6 +424,7 @@ function putblocklist(c, o, blockids)
 end
 
 function writebytes_block(c, o, data, _nblocks)
+    @info "AzStorage, writebytes_block..."
     # heuristic to increase probability that token is valid during the retry logic in AzSessions.c
     l = ceil(Int, log10(_nblocks))
     blockids = [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
@@ -435,16 +436,20 @@ function writebytes_block(c, o, data, _nblocks)
         length(data)::Csize_t, c.nthreads::Cint, _nblocks::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::ResponseCodes
     (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
     authinfo!(c.session, _token, refresh_token, expiry)
+    @info "...AzStorage, putblocklist..."
     putblocklist(c, o, blockids)
+    @info "...AzStorage, writebytes_block."
 end
 
 function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; contenttype="application/octet-stream")
+    @info "AzStorage, writebytes..."
     _nblocks = nblocks(c.nthreads, length(data))
     if Sys.iswindows()
         writebytes_blob(c, o, data, contenttype)
     else
         writebytes_block(c, o, data, _nblocks)
     end
+    @info "...AzStorage, writebytes."
     nothing
 end
 
@@ -455,8 +460,11 @@ Write the string `data` to a blob with name `blobname` in `container::AzContaine
 Optionally, one can specify the content-type of the blob using the `contenttype` keyword argument.
 For example: `content-type="text/plain", `content-type="applicaton/json", etc..
 """
-Base.write(c::AzContainer, o::AbstractString, data::AbstractString; contenttype="text/plain") =
+function Base.write(c::AzContainer, o::AbstractString, data::AbstractString; contenttype="text/plain")
+    @info "AzStorage, write string..."
     writebytes(c, o, transcode(UInt8, data); contenttype=contenttype)
+    @info "...AzStorage, write string."
+end
 
 _iscontiguous(data::DenseArray) = isbitstype(eltype(data))
 _iscontiguous(data::SubArray) = isbitstype(eltype(data)) && Base.iscontiguous(data)
