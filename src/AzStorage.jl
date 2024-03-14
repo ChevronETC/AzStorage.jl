@@ -25,7 +25,12 @@ const API_VERSION = "2021-08-06"
 # buffer size for holding OAuth2 tokens
 const BUFFER_SIZE = unsafe_load(cglobal((:BUFFER_SIZE, libAzStorage), Int32))
 
+windows_one_thread(nthreads) = Sys.iswindows() ? 1 : nthreads
+
 function __init__()
+    if Sys.iswindows()
+        @warn "On Windows, AzStorage is limited to a single thread, meaning that performance may be degraded."
+    end
     @ccall libAzStorage.curl_init(length(RETRYABLE_HTTP_ERRORS)::Cint, length(RETRYABLE_CURL_ERRORS)::Cint, RETRYABLE_HTTP_ERRORS::Ptr{Clong}, RETRYABLE_CURL_ERRORS::Ptr{Clong}, API_VERSION::Cstring)::Cvoid
     resetperf_counters()
 end
@@ -111,13 +116,6 @@ Base.open(object::AzObject, mode="w+") = object
 Base.close(object::AzObject) = nothing
 
 const __OAUTH_SCOPE = "offline_access+openid+https://storage.azure.com/user_impersonation"
-
-function windows_one_thread(nthreads)
-    if Sys.iswindows() && nthreads != 1
-        @warn "On Windows, AzStorage is limited to a single thread."
-    end
-    Sys.iswindows() ? 1 : nthreads
-end
 
 """
     container = AzContainer("containername"; storageaccount="myacccount", kwargs...)
