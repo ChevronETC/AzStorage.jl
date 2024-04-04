@@ -436,6 +436,17 @@ function writebytes_block(c, o, data, _nblocks)
     putblocklist(c, o, blockids)
 end
 
+# function writebytes_single_block(c, o, data, blockid)
+#     t = token(c.session)
+#     _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
+#     token_lock = @ccall 
+#     r = @ccall libAzStorage.curl_writebytes_block_retry(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
+#     clientid::Cstring, client_secret::Cstring,c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, _blockids::Ptr{Cstring}, data::Ptr{UInt8},
+#     length(data)::Csize_t, c.nthreads::Cint, _nblocks::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::ResponseCodes
+# (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
+# authinfo!(c.session, _token, refresh_token, expiry)
+
+# end
 function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; contenttype="application/octet-stream")
     _nblocks = nblocks(c.nthreads, length(data))
     if Sys.iswindows()
@@ -729,22 +740,32 @@ cp("localfile.txt", AzContainer("mycontainer";storageaccount="mystorageaccount")
 
 ## blob to local file
 ```
-cp(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt", "localfile.txt")
+cp(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt", "localfile.txt", chunksize=2_000_000)
 ```
+`chunksize` can be modified to set the size of chunks being in memory at one time. Default is 2GB
 
 ## blob to blob
 ```
 cp(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob_in.txt", AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob_out.txt")
 ```
 """
-function Base.cp(in::AbstractString, outc::AzContainer, outb::AbstractString)
+function Base.cp(in::AbstractString, outc::AzContainer, outb::AbstractString, chunksize=2_000_000)
     bytes = read!(in, Vector{UInt8}(undef,filesize(in)))
     write(outc, outb, bytes)
 end
 
-function Base.cp(inc::AzContainer, inb::AbstractString, out::AbstractString)
-    bytes = read!(inc, inb, Vector{UInt8}(undef, filesize(inc, inb)))
-    write(out, bytes)
+```
+```
+function Base.cp(inc::AzContainer, inb::AbstractString, out::AbstractString; chunksize=2_000_000)
+    n = filesize(inc, inb)
+    io = open(out, "w")
+    for i1=0:chunksize:n-1
+        i2 = min(i1+chunksize-1,n-1)
+        _chunksize = i2 - i1 + 1
+        bytes = read!(inc, inb, Vector{UInt8}(undef, _chunksize), offset=i1)
+        write(io, bytes)
+    end
+    close(io)
 end
 
 function Base.cp(inc::AzContainer, inb::AbstractString, outc::AzContainer, outb::AbstractString)
@@ -775,7 +796,7 @@ cp(open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblo
 ```
 """
 Base.cp(in::AbstractString, out::AzObject) = cp(in, out.container, out.name)
-Base.cp(in::AzObject, out::AbstractString) = cp(in.container, in.name, out)
+Base.cp(in::AzObject, out::AbstractString; kwargs...) = cp(in.container, in.name, out; kwargs...)
 Base.cp(in::AzObject, out::AzObject) = cp(in.container, in.name, out.container, out.name)
 
 Base.cp(inc::AzContainer, inb::AbstractString, out::AzObject) = cp(inc, inb, out.container, out.name)
