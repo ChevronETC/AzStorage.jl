@@ -479,7 +479,7 @@ end
     n = 100
     x = rand(UInt8, n)
     write(c, "foo.txt", x)
-    cp(c, "foo.txt", "foolocal.txt", chunksize=11)
+    cp(c, "foo.txt", "foolocal.txt", buffersize=11)
     @test read!("foolocal.txt", Vector{UInt8}(undef, n)) == x
     rm(c)
     rm("foolocal.txt")
@@ -494,6 +494,19 @@ end
     @test read(c, "foo.txt", String) == "Hello world"
     rm(c)
     rm("foolocal.txt")
+end
+
+@testset "Container, copy large local file to blob" begin
+    n = 100
+    x = rand(UInt8, n)
+    write("foolocal.bin", x)
+    r = uuid4()
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    c = robust_mkpath(c)
+    cp("foolocal.bin", c, "foo.bin", buffersize=11)
+    @test read!(c, "foo.bin", Vector{UInt8}(undef, n)) == x
+    rm(c)
+    rm("foolocal.bin")
 end
 
 @testset "Container, copy blob to blob" begin
