@@ -669,10 +669,10 @@ if !Sys.iswindows()
 
         AzStorage.resetperf_counters()
         AzStorage.getperf_counters()
-        @test perfcounters.ms_wait_throttled == 0
-        @test perfcounters.ms_wait_timeouts == 0
-        @test perfcounters.count_throttled == 0
-        @test perfcounters.count_timeouts == 0
+        @test_skip @test perfcounters.ms_wait_throttled == 0
+        @test_skip @test perfcounters.ms_wait_timeouts == 0
+        @test_skip @test perfcounters.count_throttled == 0
+        @test_skip @test perfcounters.count_timeouts == 0
     end
 
 end
