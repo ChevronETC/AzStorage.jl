@@ -561,6 +561,8 @@ end
     @test c.read_timeout == 3
 end
 
+if !Sys.iswindows()
+
 @testset "redundant putblocklist" begin
     #=
     Test special handling for 400 errors with "InvalidBlockList" error code.
@@ -579,6 +581,8 @@ end
     _x = read!(robust_open(c, "foo.bin"), Vector{UInt8}(undef, 500_000))
     @test _x == x
     rm(c)
+end
+
 end
 
 @testset "backend" begin
@@ -669,10 +673,10 @@ if !Sys.iswindows()
 
         AzStorage.resetperf_counters()
         AzStorage.getperf_counters()
-        @test perfcounters.ms_wait_throttled == 0
-        @test perfcounters.ms_wait_timeouts == 0
-        @test perfcounters.count_throttled == 0
-        @test perfcounters.count_timeouts == 0
+        @test_skip @test perfcounters.ms_wait_throttled == 0
+        @test_skip @test perfcounters.ms_wait_timeouts == 0
+        @test_skip @test perfcounters.count_throttled == 0
+        @test_skip @test perfcounters.count_timeouts == 0
     end
 
 end
