@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [master]
+    branches: [asynccp_ci]
     tags: ["*"]
   pull_request:
 jobs:
