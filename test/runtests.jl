@@ -622,15 +622,18 @@ end
 
 if !Sys.iswindows()
     @testset "C token refresh, write" begin
+        @info "LINE $(@__LINE__) in $(@__FILE__)"
         r = uuid4()
         c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=4, connect_timeout=2, read_timeout=3)
         c = robust_mkpath(c)
         o = "foo.bin"
+        @info "LINE $(@__LINE__) in $(@__FILE__)"
 
         nthreads = c.nthreads
 
         N = round(Int, AzStorage._MINBYTES_PER_BLOCK * nthreads * 5)
         data = rand(UInt8, N)
+        @info "LINE $(@__LINE__) in $(@__FILE__)"
 
         _nblocks = AzStorage.nblocks(nthreads, length(data))
 
@@ -638,21 +641,28 @@ if !Sys.iswindows()
         blockids = [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
         _blockids = [HTTP.escapeuri(blockid) for blockid in blockids]
         t = token(c.session; offset=Minute(10))
+        @info "LINE $(@__LINE__) in $(@__FILE__)"
 
         c.session.expiry = now() # force a token refresh in the C code
 
+        @info "LINE $(@__LINE__) in $(@__FILE__)"
         _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = AzStorage.authinfo(c.session)
+        @info "LINE $(@__LINE__) in $(@__FILE__)"
 
         r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
             clientid::Cstring, client_secret::Cstring,c.storageaccount::Cstring, c.containername::Cstring, AzStorage.addprefix(c,o)::Cstring, _blockids::Ptr{Cstring}, data::Ptr{UInt8},
             length(data)::Csize_t, c.nthreads::Cint, _nblocks::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::AzStorage.ResponseCodes
 
+        @info "LINE $(@__LINE__) in $(@__FILE__)"
         AzStorage.authinfo!(c.session, _token, refresh_token, expiry)
         @test t != c.session.token
+        @info "LINE $(@__LINE__) in $(@__FILE__)"
 
         AzStorage.putblocklist(c, o, blockids)
+        @info "LINE $(@__LINE__) in $(@__FILE__)"
 
         _data = read!(c, o, Vector{UInt8}(undef, N))
+        @info "LINE $(@__LINE__) in $(@__FILE__)"
         @test data ≈ _data
     end
 
