@@ -649,6 +649,18 @@ if !Sys.iswindows()
         _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = AzStorage.authinfo(c.session)
         @info "LINE $(@__LINE__) in $(@__FILE__)"
 
+        @show _token
+
+        @show refresh_token
+        
+        @show expiry
+
+        @show resource
+
+        @show tenant
+
+        @show clientid
+
         r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
             clientid::Cstring, client_secret::Cstring,c.storageaccount::Cstring, c.containername::Cstring, AzStorage.addprefix(c,o)::Cstring, _blockids::Ptr{Cstring}, data::Ptr{UInt8},
             length(data)::Csize_t, c.nthreads::Cint, _nblocks::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::AzStorage.ResponseCodes
