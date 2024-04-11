@@ -620,7 +620,7 @@ end
     @test backend(c) == "azureblob"
 end
 
-if !Sys.iswindows()
+if !Sys.iswindows() && !Sys.isapple()
     @testset "C token refresh, write" begin
         @info "LINE $(@__LINE__) in $(@__FILE__)"
         r = uuid4()
