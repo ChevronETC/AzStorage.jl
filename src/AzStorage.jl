@@ -1,6 +1,6 @@
 module AzStorage
 
-using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles, XML, HTTP, Serialization, Sockets
+using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles, XML, HTTP, Printf, ProgressMeter, Serialization, Sockets
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
 # https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/request-limits-and-throttling
@@ -265,7 +265,7 @@ end
 
 function authinfo!(session::AzSessions.AzVMSession, _token, refresh_token, expiry)
     session.expiry = unix2datetime(expiry[1])
-    session.token = unsafe_string(point(_token))
+    session.token = unsafe_string(pointer(_token))
 end
 
 """
@@ -726,37 +726,43 @@ copy a blob to a local file, a local file to a blob, or a blob to a blob.
 
 ## local file to blob
 ```
-cp("localfile.txt", AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt")
+cp("localfile.txt", AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt"; buffersize=2_000_000_000, show_progress=false)
 ```
 
 ## blob to local file
 ```
-cp(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt", "localfile.txt", buffersize=2_000_000_000)
+cp(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt", "localfile.txt", buffersize=2_000_000_000, show_progress=false)
 ```
-`buffersize` is the memory buffer size (in bytes) used in the copy algorithm, and defaults to `2_000_000_000` bytes (2GB).
-
+`buffersize` is the memory buffer size (in bytes) used in the copy algorithm, and defaults to `2_000_000_000` bytes (2GB).  Note that
+half of this memory is used to buffer reads, and the other half is used to buffer writes. Set `show_progress=true` to display a
+progress bar for the copy operation.
 ## blob to blob
 ```
 cp(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob_in.txt", AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob_out.txt")
 ```
 """
-function Base.cp(in::AbstractString, outc::AzContainer, outb::AbstractString; buffersize=2_000_000_000)
+function Base.cp(in::AbstractString, outc::AzContainer, outb::AbstractString; buffersize=2_000_000_000, show_progress=false)
     if Sys.iswindows()
         bytes = read!(in, Vector{UInt8}(undef, filesize(in)))
         write(outc, outb, bytes)
     else
         n = filesize(in)
-        _nblocks = nblocks(outc.nthreads, n, div(buffersize, outc.nthreads))
+        _buffersize = div(buffersize, 2)
+        _nblocks = nblocks(outc.nthreads, n, div(_buffersize, outc.nthreads))
         _blockids = blockids(_nblocks)
         nominal_bytes_per_block,remaining_bytes_per_block = divrem(n, _nblocks)
-        nblocks_per_buffer,remaining_blocks_per_buffer = divrem(buffersize, nominal_bytes_per_block)
+        nblocks_per_buffer,remaining_blocks_per_buffer = divrem(_buffersize, nominal_bytes_per_block)
         nblocks_per_buffer += remaining_blocks_per_buffer > 0 ? 1 : 0
 
-        buffer = Vector{UInt8}(undef, nblocks_per_buffer*(nominal_bytes_per_block + 1))
+        buffer_read,buffer_write = ntuple(_->Vector{UInt8}(undef, nblocks_per_buffer*(nominal_bytes_per_block + 1)), 2)
 
+        tsk_write = @async nothing
         i2byte = nbytes_buffer = 0
         i1block = 1
         io = open(in, "r")
+        iter = 1:_nblocks
+        speed_read,speed_write = 0.0,0.0
+        progress = Progress(length(iter); enabled=show_progress, desc="read/write = 0.00/0.00 MB/s")
         for iblock = 1:_nblocks
             i1byte = i2byte + 1
 
@@ -768,28 +774,59 @@ function Base.cp(in::AbstractString, outc::AzContainer, outb::AbstractString; bu
 
             nbytes_buffer += i2byte - i1byte + 1
 
-            if iblock == _nblocks || nbytes_buffer >= buffersize
-                _buffer = @view buffer[1:nbytes_buffer]
-                read!(io, _buffer)
-                writebytes_block(outc, outb, _buffer, _blockids[i1block:iblock])
+            if iblock == _nblocks || nbytes_buffer >= _buffersize
+                _buffer_read = @view buffer_read[1:nbytes_buffer]
+                t_read = @elapsed read!(io, _buffer_read)
+                speed_read = (nbytes_buffer / 1_000_000) / t_read
+
+                wait(tsk_write)
+                buffer_read,buffer_write = buffer_write,buffer_read
+
+                nbytes_buffer_write,i1block_write,iblock_write = nbytes_buffer,i1block,iblock
+                _buffer_write = @view buffer_write[1:nbytes_buffer_write]
+                tsk_write = @async begin
+                    t_write = @elapsed writebytes_block(outc, outb, _buffer_write, _blockids[i1block_write:iblock_write])
+                    speed_write = (nbytes_buffer_write / 1_000_000) / t_write
+                end
                 i1block = iblock + 1
                 nbytes_buffer = 0
             end
+            progress.core.desc = @sprintf "read/write = %.2f/%.2f MB/s" speed_read speed_write
+            next!(progress)
         end
+        wait(tsk_write)
         putblocklist(outc, outb, _blockids)
     end
 end
 
-function Base.cp(inc::AzContainer, inb::AbstractString, out::AbstractString; buffersize=2_000_000_000)
+function Base.cp(inc::AzContainer, inb::AbstractString, out::AbstractString; buffersize=2_000_000_000, show_progress=false)
     n = filesize(inc, inb)
     io = open(out, "w")
-    buffer = Vector{UInt8}(undef, min(buffersize, n))
-    for i1 = 0:buffersize:n-1
-        _buffersize = min(buffersize, n - i1)
-        _buffer = buffersize == _buffersize ? buffer : view(buffer, 1:_buffersize)
-        read!(inc, inb, _buffer, offset=i1)
-        write(io, _buffer)
+    _buffersize = div(buffersize, 2)
+    buffer_read,buffer_write = ntuple(_->Vector{UInt8}(undef, min(_buffersize, n)), 2)
+    tsk_write = @async nothing
+    speed_read,speed_write = 0.0,0.0
+    iter = 0:_buffersize:n-1
+    progress = Progress(length(iter); enabled=show_progress, desc="read/write = 0.00/0.00 MB/s")
+    for i1 = iter
+        __buffersize = min(_buffersize, n - i1)
+        _buffer_read = _buffersize == __buffersize ? buffer_read : view(buffer_read, 1:__buffersize)
+        t_read = @elapsed read!(inc, inb, _buffer_read, offset=i1)
+        speed_read = (__buffersize / 1_000_000) / t_read
+
+        wait(tsk_write)
+        buffer_read,buffer_write = buffer_write,buffer_read
+
+        __buffersize_write = __buffersize
+        _buffer_write = _buffersize == __buffersize ? buffer_write : view(buffer_write, 1:__buffersize_write)
+        tsk_write = @async begin
+            t_write = @elapsed write(io, _buffer_write)
+            speed_write = (__buffersize_write / 1_000_000) / t_write
+        end
+        progress.core.desc = @sprintf "read/write = %.2f/%.2f MB/s" speed_read speed_write
+        next!(progress)
     end
+    wait(tsk_write)
     close(io)
 end
 
@@ -807,14 +844,16 @@ copy a blob to a local file, a local file to a blob, or a blob to a blob.
 
 ## local file to blob
 ```
-cp("localfile.txt", open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt"))
+cp("localfile.txt", open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt"); buffersize=2_000_000_000, show_progress=false)
 ```
 
 ## blob to local file
 ```
-cp(open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt"), "localfile.txt"; buffersize=2_000_000_000)
+cp(open(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob.txt"), "localfile.txt"; buffersize=2_000_000_000, show_progress=false)
 ```
-`buffersize` is the memory buffer size (in bytes) used in the copy algorithm, and defaults to `2_000_000_000` bytes (2GB).
+`buffersize` is the memory buffer size (in bytes) used in the copy algorithm, and defaults to `2_000_000_000` bytes (2GB).  Note that
+half of this memory is used to buffer reads, and the other half is used to buffer writes. Set `show_progress=true` to display a
+progress bar for the copy operation.
 
 ## blob to blob
 ```
