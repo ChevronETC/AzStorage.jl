@@ -297,6 +297,11 @@ end
     rm(c)
 end
 
+@tests "Containers, isdir" begin
+    c = AzContainer("x"; storageaccount="dne", session=session)
+    @test isdir(c) == false
+end
+
 @testset "Object, bytes" begin
     r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)

@@ -169,7 +169,7 @@ function isretryable(e::HTTP.StatusError)
     false
 end
 isretryable(e::Base.IOError) = true
-isretryable(e::HTTP.Exceptions.ConnectError) = true
+isretryable(e::HTTP.Exceptions.ConnectError) = Base.uverrorname(e.error.code) == "EAI_NONAME" ? false : true
 isretryable(e::HTTP.Exceptions.HTTPError) = true
 isretryable(e::HTTP.Exceptions.RequestError) = true
 isretryable(e::HTTP.Exceptions.TimeoutError) = true
@@ -982,7 +982,27 @@ Returns true if the blob corresponding to `object` exists.
 """
 Base.isfile(o::AzObject) = isfile(o.container, o.name)
 
-iscontainer(c::AzContainer) = c.containername ∈ containers(storageaccount=c.storageaccount, session=c.session, nretry=c.nretry)
+function isstorageaccount(c::AzContainer)
+    _isstorageaccount = true
+    try
+        @retry c.nretry HTTP.request(
+            "HEAD",
+            "https://$(c.storageaccount).blob.core.windows.net?restype=account&comp=properties",
+            [
+                "Authorization" => "Bearer $(token(c.session))",
+                "x-ms-version" => API_VERSION
+            ],
+            retry = false,
+            verbose = c.verbose,
+            connect_timeout = c.connect_timeout,
+            readtimeout = c.read_timeout)
+    catch
+        _isstorageaccount = false
+    end
+    _isstorageaccount
+end
+
+iscontainer(c::AzContainer) = isstorageaccount(c) && (c.containername ∈ containers(storageaccount=c.storageaccount, session=c.session, nretry=c.nretry))
 
 """
     isdir(container)
