@@ -990,6 +990,9 @@ iscontainer(c::AzContainer) = c.containername ∈ containers(storageaccount=c.st
 Returns true if `container::AzContainer` exists.
 """
 function Base.isdir(c::AzContainer)
+    if c.storageaccount == "" || c.containername == ""
+        return false
+    end
     if !iscontainer(c)
         return false
     end
