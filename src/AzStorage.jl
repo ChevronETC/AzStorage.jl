@@ -77,11 +77,11 @@ io = open(AzContainer("mycontainer"; storageaccount="myaccount"), "foo.bin")
 write(io, rand(10))
 ```
 """
-function Base.open(container::AzContainer, name, fails_without_continer=true)
+function Base.open(container::AzContainer, name, fails_without_container=true)
     try
         mkpath(container)
     catch e
-        if fails_without_continer
+        if fails_without_container
             throw(e)
         end
     end
