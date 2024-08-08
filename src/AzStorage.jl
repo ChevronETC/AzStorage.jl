@@ -77,8 +77,14 @@ io = open(AzContainer("mycontainer"; storageaccount="myaccount"), "foo.bin")
 write(io, rand(10))
 ```
 """
-function Base.open(container::AzContainer, name)
-    mkpath(container)
+function Base.open(container::AzContainer, name, fails_without_continer=true)
+    try
+        mkpath(container)
+    catch e
+        if fails_without_continer
+            throw(e)
+        end
+    end
     AzObject(container, string(name))
 end
 
@@ -94,7 +100,7 @@ io = joinpath(AzContainer("mycontainer"; storageaccount="myaccount"), "foo.bin")
 write(io, rand(10))
 ```
 """
-Base.joinpath(container::AzContainer, name...) = open(container, join(name, '/'))
+Base.joinpath(container::AzContainer, name...) = open(container, join(name, '/'), false)
 
 """
     open(object::AzObject[, mode="w+"]) -> object
@@ -168,8 +174,9 @@ function isretryable(e::HTTP.StatusError)
     e.status ∈ RETRYABLE_HTTP_ERRORS && (return true)
     false
 end
+isnoname_error(e::HTTP.Exceptions.ConnectError) = isa(e.error, CapturedException) && isa(e.error.ex, Sockets.DNSError) && Base.uverrorname(e.error.ex.code) == "EAI_NONAME"
+isretryable(e::HTTP.Exceptions.ConnectError) = isnoname_error(e) ? false : true
 isretryable(e::Base.IOError) = true
-isretryable(e::HTTP.Exceptions.ConnectError) = true
 isretryable(e::HTTP.Exceptions.HTTPError) = true
 isretryable(e::HTTP.Exceptions.RequestError) = true
 isretryable(e::HTTP.Exceptions.TimeoutError) = true
@@ -968,6 +975,8 @@ function Base.isfile(c::AzContainer, object::AbstractString)
     catch e
         if isa(e, HTTP.Exceptions.StatusError) && e.status == 404
             return false
+        elseif isnoname_error(e)
+            return false
         else
             throw(e)
         end
@@ -982,7 +991,12 @@ Returns true if the blob corresponding to `object` exists.
 """
 Base.isfile(o::AzObject) = isfile(o.container, o.name)
 
-iscontainer(c::AzContainer) = c.containername ∈ containers(storageaccount=c.storageaccount, session=c.session, nretry=c.nretry)
+function iscontainer(c::AzContainer)
+    if c.storageaccount == "" || c.containername == ""
+        return false
+    end
+    c.containername ∈ containers(storageaccount=c.storageaccount, session=c.session, nretry=c.nretry)
+end
 
 """
     isdir(container)
@@ -990,9 +1004,6 @@ iscontainer(c::AzContainer) = c.containername ∈ containers(storageaccount=c.st
 Returns true if `container::AzContainer` exists.
 """
 function Base.isdir(c::AzContainer)
-    if c.storageaccount == "" || c.containername == ""
-        return false
-    end
     if !iscontainer(c)
         return false
     end

@@ -359,6 +359,12 @@ end
     rm(c)
 end
 
+@testset "Object, joinpath with invalid container" begin
+    c = AzContainer(""; storageaccount="", session=session, nthreads=2, nretry=10)
+    io = joinpath(c, "bar", "baz")
+    @test isfile(io) == false
+end
+
 @testset "Object, open" begin
     r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
