@@ -1,6 +1,6 @@
 name = "AzStorage"
 uuid = "c6697862-1611-5eae-9ef8-48803c85c8d6"
-version = "2.6.1"
+version = "2.6.2"
 
 [deps]
 AbstractStorage = "14dbef02-f468-5f15-853e-5ec8dee7b899"
