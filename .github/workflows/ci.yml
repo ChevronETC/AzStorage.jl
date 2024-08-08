@@ -33,7 +33,7 @@ jobs:
         id: uuid
         run: julia -e 'using Random; write(stdout,"::set-output name=uuid::"*lowercase(randstring(21)))'
         shell: bash
-      - name: Run Az CLI script
+      - name: Run Az CLI script - create resource group / storage accounts
         run: |
           az group create -l southcentralus -n "AzureBackupRG-azstorage-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}"
           az storage account create --min-tls-version TLS1_2 -n "s${{ steps.uuid.outputs.uuid }}" -g "AzureBackupRG-azstorage-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}" -l southcentralus
@@ -49,6 +49,10 @@ jobs:
       - uses: codecov/codecov-action@v1
         with:
           file: lcov.info
+      - name: Run Az CLI script - delete resource group / storage accounts
+        run: |
+          az group delete -n "AzureBackupRG-azstorage-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}" --yes
+        if: ${{ always() }}
   docs:
     name: Documentation
     runs-on: ubuntu-latest
