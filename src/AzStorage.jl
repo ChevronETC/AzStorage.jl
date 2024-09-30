@@ -883,6 +883,9 @@ function Base.readdir(c::AzContainer; filterlist=true)
     marker = ""
     names = String[]
     prefix = filterlist ? c.prefix : ""
+    if prefix == ""
+        filterlist = false
+    end
     while true
         r = @retry c.nretry HTTP.request(
             "GET",
