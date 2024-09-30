@@ -83,11 +83,13 @@ end
 
     write(c, "bar", "one")
     write(c, "baz", "two")
+    write(c, "bar/bap", "three")
 
     l = readdir(c)
 
     @test "bar" ∈ l
     @test "baz" ∈ l
+    @test "bar/bap" ∈ l
 
     containers(storageaccount=c.storageaccount, session=c.session)
     @test isdir(c)
