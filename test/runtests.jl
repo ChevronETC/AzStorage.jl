@@ -502,6 +502,7 @@ end
     write("foolocal.txt", "Hello world")
     r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    @test_throws "does not exist" cp("foolocal.txt", c, "foo.txt")
     robust_mkpath(c)
     cp("foolocal.txt", c, "foo.txt")
     @test read(c, "foo.txt", String) == "Hello world"
