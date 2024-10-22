@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - 1.6
+          - lts
           - 1 # automatically expands to the latest stable 1.x release of Julia
         os:
           - ubuntu-latest
@@ -25,7 +25,7 @@ jobs:
       - uses: azure/login@v1.1
         with:
           creds: '{"clientId":"${{ secrets.CLIENT_ID }}","clientSecret":"${{ secrets.CLIENT_SECRET }}","subscriptionId":"${{ secrets.SUBSCRIPTION_ID }}","tenantId":"${{ secrets.TENANT_ID }}"}'
-      - uses: julia-actions/setup-julia@v1
+      - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
