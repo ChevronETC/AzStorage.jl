@@ -749,7 +749,7 @@ cp(AzContainer("mycontainer";storageaccount="mystorageaccount"), "remoteblob_in.
 ```
 """
 function Base.cp(in::AbstractString, outc::AzContainer, outb::AbstractString; buffersize=2_000_000_000, show_progress=false)
-    if !isdir(outc)
+    if !iscontainer(outc)
         error("output container '$outc' does not exist. use `mkpath to create it.")
     end
 

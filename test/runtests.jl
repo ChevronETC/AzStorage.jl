@@ -514,6 +514,17 @@ end
     rm("foolocal.txt")
 end
 
+@testset "Container, copy local file to blob, with prefix" begin
+    write("foolocal.txt", "Hello world")
+    r = uuid4()
+    c = AzContainer("one/two/three/four/foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    robust_mkpath(c)
+    cp("foolocal.txt", c, "foo.txt")
+    @test read(c, "foo.txt", String) == "Hello world"
+    rm(c)
+    rm("foolocal.txt")
+end
+
 @testset "Container, copy large local file to blob" begin
     n = 100
     x = rand(UInt8, n)
