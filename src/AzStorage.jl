@@ -174,15 +174,22 @@ function isretryable(e::HTTP.StatusError)
     e.status ∈ RETRYABLE_HTTP_ERRORS && (return true)
     false
 end
+function isretryable(e::HTTP.RequestError)
+    e.request.response.status == 404 && (return false)
+    true
+end
 isnoname_error(e::HTTP.Exceptions.ConnectError) = isa(e.error, CapturedException) && isa(e.error.ex, Sockets.DNSError) && Base.uverrorname(e.error.ex.code) == "EAI_NONAME"
 isretryable(e::HTTP.Exceptions.ConnectError) = isnoname_error(e) ? false : true
 isretryable(e::Base.IOError) = true
 isretryable(e::HTTP.Exceptions.HTTPError) = true
-isretryable(e::HTTP.Exceptions.RequestError) = true
 isretryable(e::HTTP.Exceptions.TimeoutError) = true
 isretryable(e::Base.EOFError) = true
 isretryable(e::Sockets.DNSError) = Base.uverrorname(e.code) == "EAI_NONAME" ? false : true
 isretryable(e) = false
+
+azstorage_exception(e::HTTP.RequestError) = e.request.response.status == 404 ? FileDoesNotExistError() : e
+azstorage_exception(e::HTTP.StatusError) = e.status == 404 ? FileDoesNotExistError() : e
+azstorage_exception(e) = e
 
 status(e::HTTP.StatusError) = e.status
 status(e) = 999
@@ -199,7 +206,7 @@ macro retry(retries, ex::Expr)
                 r = $(esc(ex))
                 break
             catch e
-                (i < $(esc(retries)) && isretryable(e)) || throw(e)
+                (i < $(esc(retries)) && isretryable(e)) || throw(azstorage_exception(e))
                 maximum_backoff = 256
                 s = min(2.0^(i-1), maximum_backoff) + rand()
                 if status(e) == 429
@@ -605,7 +612,7 @@ end
 
 nthreads_effective(nthreads::Integer, nbytes::Integer) = clamp(div(nbytes, _MINBYTES_PER_BLOCK), 1, nthreads)
 
-function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; offset=0)
+function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; offset=0, serial=Sys.iswindows())
     function readbytes_serial!(c, o, data, offset)
         @retry c.nretry HTTP.open(
                 "GET",
@@ -631,15 +638,16 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
         r = @ccall libAzStorage.curl_readbytes_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
             clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, data::Ptr{UInt8}, offset::Csize_t,
             length(data)::Csize_t, _nthreads::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::ResponseCodes
+        r.http == 404 && throw(FileDoesNotExistError())
         (r.http >= 300 || r.curl > 0) && error("readbytes_threaded! error: http code $(r.http), curl code $(r.curl)")
         authinfo!(c.session, _token, refresh_token, expiry)
         nothing
     end
 
-    _nthreads = nthreads_effective(c.nthreads, length(data))
-    if Sys.iswindows()
+    if serial
         readbytes_serial!(c, o, data, offset)
     else
+        _nthreads = nthreads_effective(c.nthreads, length(data))
         readbytes_threaded!(c, o, data, offset, _nthreads)
     end
     data
@@ -662,10 +670,13 @@ method returns `data`.  For example,
 data = read!(AzContainer("foo";storageaccount="bar"), "baz.bin", Vector{Float32}(undef,10))
 ```
 """
-function Base.read!(c::AzContainer, o::AbstractString, data::AbstractArray{T}; offset=0) where {T}
+function Base.read!(c::AzContainer, o::AbstractString, data::AbstractArray{T}; offset=0, serial=false) where {T}
+    if Sys.iswindows()
+        serial = true
+    end
     if _iscontiguous(data)
         _data = unsafe_wrap(Array, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false)
-        readbytes!(c, o, _data; offset=offset*sizeof(T))
+        readbytes!(c, o, _data; offset=offset*sizeof(T), serial)
     else
         error("AzStorage does not support reading objects of type $T and/or into a non-contiguous array.")
     end
@@ -980,7 +991,9 @@ function Base.isfile(c::AzContainer, object::AbstractString)
             connect_timeout = c.connect_timeout,
             readtimeout = c.read_timeout)
     catch e
-        if isa(e, HTTP.Exceptions.StatusError) && e.status == 404
+        if isa(e, FileDoesNotExistError)
+            return false
+        elseif isa(e, HTTP.Exceptions.StatusError) && e.status == 404
             return false
         elseif isnoname_error(e)
             return false

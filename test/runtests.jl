@@ -649,6 +649,24 @@ end
     @test backend(c) == "azureblob"
 end
 
+@testset "file does not exist" for serial in (true,false)
+    r = uuid4()
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    mkpath(c)
+    @test_throws FileDoesNotExistError read!(c, "doesnotexist", Vector{UInt8}(undef, 10); serial)
+    rm(c)
+end
+
+@testset "force serial read" begin
+    r = uuid4()
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    x = rand(1000)
+    mkpath(c)
+    write(c, "test", x)
+    y = read!(c, "test", zeros(Float64, 1000); serial=true)
+    @test x ≈ y
+end
+
 # TODO: CI is showing a seg-fault on Apple, but I do not have an Apple machine to help debug.
 if !Sys.iswindows() && !Sys.isapple()
     @testset "C token refresh, write" begin
