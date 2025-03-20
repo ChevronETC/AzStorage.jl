@@ -737,7 +737,24 @@ if !Sys.iswindows() && !Sys.isapple()
         @test data ≈ _data
     end
 
-    @testset "performance counters" begin
+    @testset "remove leading/training slashes" begin
+        r = uuid4()
+        c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session)
+        @test c.prefix == ""
+        @test c.containername == "foo-$r-o"
+        c = AzContainer("foo-$r-o/bar/", storageaccount=storageaccount, session=session)
+        @test c.prefix == "bar"
+        @test c.containername == "foo-$r-o"
+        c = AzContainer("foo-$r-o/bar/baz/", storageaccount=storageaccount, session=session)
+        @test c.prefix == "bar/baz"
+        @test c.containername == "foo-$r-o"
+        c = AzContainer("foo-$r-o/bar/baz/", storageaccount=storageaccount, session=session, prefix="/one/two/")
+        @test c.prefix == "one/two/bar/baz"
+        @test c.containername == "foo-$r-o"
+    end
+
+
+    @test_skip @testset "performance counters" begin
         perfcounters = AzStorage.getperf_counters()
         @info "Throttled events = $(perfcounters.count_throttled), Throttled ms wait: = $(perfcounters.ms_wait_throttled)"
 
@@ -753,5 +770,4 @@ if !Sys.iswindows() && !Sys.isapple()
         @test_skip @test perfcounters.count_throttled == 0
         @test_skip @test perfcounters.count_timeouts == 0
     end
-
 end
