@@ -138,22 +138,23 @@ The storage account must already exist.
 * `verbose=0` verbosity flag passed to libcurl.
 
 # Notes
-The container name can container "/"'s.  If this is the case, then the string preceding the first "/" will
+The container name can contain "/"'s.  If this is the case, then the string preceding the first "/" will
 be the container name, and the string that remains will be pre-pended to the blob names.  This allows Azure
-to present blobs in a pseudo-directory structure.
+to present blobs in a pseudo-directory structure.  Note that trailing and leading `/`'s are ignored.
 """
 function AzContainer(containername::AbstractString; storageaccount, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nthreads=Sys.CPU_THREADS, connect_timeout=10, read_timeout=30, nretry=10, verbose=0, prefix="")
-    name = split(containername, '/')
+    name = split(strip(containername, '/'), '/')
     _containername = name[1]
-    prefix *= lstrip('/'*join(name[2:end], '/'), '/')
+    prefix = strip(strip(prefix, '/')*'/'*join(name[2:end], '/'), '/')
+
     AzContainer(String(storageaccount), String(_containername), String(prefix), session, windows_one_thread(nthreads), connect_timeout, read_timeout, nretry, verbose)
 end
 
 function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE); nthreads=Sys.CPU_THREADS, connect_timeout=10, read_timeout=30, nretry=10, verbose=0)
     AzContainer(
         d["storageaccount"],
-        d["containername"],
-        d["prefix"],
+        String(strip(d["containername"], '/')),
+        String(strip(d["prefix"], '/')),
         session,
         windows_one_thread(get(d, "nthreads", nthreads)),
         connect_timeout,
