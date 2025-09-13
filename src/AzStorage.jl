@@ -180,6 +180,7 @@ function isretryable(e::HTTP.RequestError)
     true
 end
 isnoname_error(e::HTTP.Exceptions.ConnectError) = isa(e.error, CapturedException) && isa(e.error.ex, Sockets.DNSError) && Base.uverrorname(e.error.ex.code) == "EAI_NONAME"
+isnoname_error(e) = false
 isretryable(e::HTTP.Exceptions.ConnectError) = isnoname_error(e) ? false : true
 isretryable(e::Base.IOError) = true
 isretryable(e::HTTP.Exceptions.HTTPError) = true
