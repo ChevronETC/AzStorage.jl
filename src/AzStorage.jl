@@ -20,7 +20,7 @@ const RETRYABLE_CURL_ERRORS = [
     56] # Failure with received network data.
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/versioning-for-the-azure-storage-services
-const API_VERSION = "2021-08-06"
+const API_VERSION = "2025-07-05"
 
 # buffer size for holding OAuth2 tokens
 const BUFFER_SIZE = unsafe_load(cglobal((:BUFFER_SIZE, libAzStorage), Int32))
