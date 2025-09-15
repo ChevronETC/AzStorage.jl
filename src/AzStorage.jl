@@ -855,8 +855,22 @@ function Base.cp(inc::AzContainer, inb::AbstractString, out::AbstractString; buf
 end
 
 function Base.cp(inc::AzContainer, inb::AbstractString, outc::AzContainer, outb::AbstractString)
-    bytes = read!(inc, inb, Vector{UInt8}(undef, filesize(inc, inb)))
-    write(outc, outb, bytes)
+    c = HTTP.escapeuri(inc.containername)
+    b = HTTP.escapeuri(addprefix(inc,inb))
+    source_url = "https://$(inc.storageaccount).blob.core.windows.net/$c/$b"
+    @retry inc.nretry HTTP.request(
+        "PUT",
+        "https://$(outc.storageaccount).blob.core.windows.net/$(outc.containername)/$(addprefix(outc,outb))",
+        [
+            "Authorization" => "Bearer $(token(outc.session))",
+            "x-ms-version" => API_VERSION,
+            "x-ms-copy-source" => source_url
+        ],
+        retry = false,
+        verbose = inc.verbose,
+        connect_timeout = inc.connect_timeout,
+        readtimeout = inc.read_timeout
+    )
 end
 
 """
