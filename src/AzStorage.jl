@@ -1235,7 +1235,7 @@ function list_extent_names(container::AzContainer)
         content = String(response.body)
 
         # Extract extent names
-        matches = collect(eachmatch(r"extent-\d{6}", content))
+        matches = collect(eachmatch(r"extent-0*([1-9]\d*)", content))
         append!(extent_names, [m.match for m in matches])
 
         # Extract NextMarker
