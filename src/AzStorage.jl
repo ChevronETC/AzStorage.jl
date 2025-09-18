@@ -1210,6 +1210,85 @@ function Base.cp(src::AzContainer, dst::AzContainer)
     nothing
 end
 
+"""
+    list_extent_names(container)
+
+Return list of extents for `container::AzContainer`
+"""
+function list_extent_names(container::AzContainer)
+    marker = ""
+    extent_names = String[]
+    storage_account = container.storageaccount
+
+    while true
+        url = "https://$storage_account.blob.core.windows.net/$(container.containername)?restype=container&comp=list&prefix=$(container.prefix)/extents/"
+        if !isempty(marker)
+            url *= "&marker=$marker"
+        end
+
+        headers = [
+            "Authorization" => "Bearer $(token(container.session))",
+            "x-ms-version" => API_VERSION,
+        ]
+
+        response = HTTP.get(url, headers)
+        content = String(response.body)
+
+        # Extract extent names
+        matches = collect(eachmatch(r"extent-\d{6}", content))
+        append!(extent_names, [m.match for m in matches])
+
+        # Extract NextMarker
+        marker_match = match(r"<NextMarker>(.*?)</NextMarker>", content)
+        marker = marker_match !== nothing ? marker_match.captures[1] : ""
+
+        if isempty(marker)
+            break
+        end
+    end
+
+    @info "Total extents found: $(length(extent_names))"
+    return extent_names
+end
+
+"""
+    rehydrate_blob(container,tier)
+
+Blobs that have changed to access level archive, are no longer readable. 
+This function rehyrates a blob (changes access tier) from archive to 
+`tier::String`. The options for `tier::String`` are Cold, Cool, Hot.
+"""
+function rehydrate_blob(container::AzContainer,tier::String)
+
+    headers = [
+        "Authorization" => "Bearer $(token(container.session))",
+        "x-ms-version" => API_VERSION,
+        "x-ms-access-tier" => tier,
+        "Content-Length" => "0"
+    ]
+
+    storage_account = container.storageaccount
+    container_path = joinpath(container.containername,container.prefix)
+
+    # Rehydrate description   
+    file = container_path*"/description.json"
+    @info "Rehydrating file $file to tier $tier"
+    url = "https://$storage_account.blob.core.windows.net/$file?comp=tier" 
+
+    response = HTTP.request("PUT", url, headers)
+
+    # Rehydrate extents 
+    extent_names = list_extent_names(container)
+    for extent_name in extent_names
+        file = container_path*"/extents/"*extent_name
+        @info "Rehydrating file $file to tier $tier"
+
+        url = "https://$storage_account.blob.core.windows.net/$file?comp=tier" 
+        response = HTTP.request("PUT", url, headers)
+    end
+end
+
+
 struct PerfCounters
     ms_wait_throttled::Clonglong
     ms_wait_timeouts::Clonglong
