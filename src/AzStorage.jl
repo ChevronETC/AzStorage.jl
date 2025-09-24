@@ -1,6 +1,6 @@
 module AzStorage
 
-using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles, XML, HTTP, Printf, ProgressMeter, Serialization, Sockets
+using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles, XML, HTTP, Printf, ProgressMeter, SHA, Serialization, Sockets
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
 # https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/request-limits-and-throttling
@@ -854,9 +854,196 @@ function Base.cp(inc::AzContainer, inb::AbstractString, out::AbstractString; buf
     close(io)
 end
 
-function Base.cp(inc::AzContainer, inb::AbstractString, outc::AzContainer, outb::AbstractString)
-    bytes = read!(inc, inb, Vector{UInt8}(undef, filesize(inc, inb)))
-    write(outc, outb, bytes)
+#=
+If the source and destination storage accounts for a blob copy are different, then the Azure storage API does not allow us
+to use OAuth2/RBAC directly for the source blob.  But, we can use a user delegation SAS token which is built in the following
+two methods: 'generate_user_delegation_key' and 'get_user_delegation_sas'.
+=#
+function get_user_delegation_key(c::AzContainer; start=now(UTC), expiry=now(UTC)+Hour(1))
+    start_str = Dates.format(start, "yyyy-mm-ddTHH:MM:SSZ")
+    expiry_str = Dates.format(expiry, "yyyy-mm-ddTHH:MM:SSZ")
+
+    r = @retry c.nretry HTTP.request(
+        "POST",
+        "https://$(c.storageaccount).blob.core.windows.net/?restype=service&comp=userdelegationkey",
+        [
+            "Authorization" => "Bearer $(token(c.session))",
+            "x-ms-version" => API_VERSION,
+            "Content-Type" => "application/xml"
+        ],
+        """
+        <?xml version="1.0" encoding="utf-8"?>
+        <KeyInfo>
+            <Start>$start_str</Start>
+            <Expiry>$expiry_str</Expiry>
+        </KeyInfo>
+        """;
+        retry = false,
+        verbose = c.verbose,
+        connect_timeout = c.connect_timeout,
+        readtimeout = c.read_timeout)
+
+    b = XML.parse(String(r.body), LazyNode)
+    delegation_key = Dict{String,String}()
+    for child in children(b)
+        if tag(child) == "UserDelegationKey"
+            for grandchild in children(child)
+                if tag(grandchild) in ("SignedOid", "SignedTid", "SignedStart", "SignedExpiry", "SignedService", "SignedVersion", "Value")
+                    delegation_key[string(tag(grandchild))] = value(first(children(grandchild)))
+                end
+            end
+        end
+    end
+
+    delegation_key
+end
+
+function generate_user_delegation_sas(c::AzContainer, b::AbstractString; permissions="r", start=now(UTC), expiry=now(UTC)+Hour(1))
+    delegation_key = get_user_delegation_key(c; start, expiry)
+
+    signedPermissions = permissions
+    signedStart = Dates.format(start, "yyyy-mm-ddTHH:MM:SSZ")
+    signedExpiry = Dates.format(expiry, "yyyy-mm-ddTHH:MM:SSZ")
+    canonicalizedResource = "/blob/$(c.storageaccount)/$(c.containername)/$(addprefix(c,b))"
+    signedKeyObjectId = delegation_key["SignedOid"]
+    signedKeyTenantId = delegation_key["SignedTid"]
+    signedKeyStart = delegation_key["SignedStart"]
+    signedKeyExpiry = delegation_key["SignedExpiry"]
+    signedKeyService = delegation_key["SignedService"]
+    signedKeyVersion = delegation_key["SignedVersion"]
+    signedAuthorizedUserObjectId = ""
+    signedUnauthorizedUserObjectId = ""
+    signedCorrelationId = ""
+    signedIP = ""
+    signedProtocol = "https"
+    signedVersion = API_VERSION
+    signedResource = "b"
+    signedSnapshotTime = ""
+    signedEncryptionScope = ""
+    rscc = ""
+    rscd = ""
+    rsce = ""
+    rscl = ""
+    rsct = ""
+
+    string_to_sign =
+        signedPermissions * "\n" *
+        signedStart * "\n" *
+        signedExpiry * "\n" *
+        canonicalizedResource * "\n" *
+        signedKeyObjectId * "\n" *
+        signedKeyTenantId * "\n" *
+        signedKeyStart * "\n" *
+        signedKeyExpiry * "\n" *
+        signedKeyService * "\n" *
+        signedKeyVersion * "\n" *
+        signedAuthorizedUserObjectId * "\n" *
+        signedUnauthorizedUserObjectId * "\n" *
+        signedCorrelationId * "\n" *
+        "\n" *
+        "\n" *
+        signedIP * "\n" *
+        signedProtocol * "\n" *
+        signedVersion * "\n" *
+        signedResource * "\n" *
+        signedSnapshotTime * "\n" *
+        signedEncryptionScope * "\n" *
+        rscc * "\n" *
+        rscd * "\n" *
+        rsce * "\n" *
+        rscl * "\n" *
+        rsct
+
+    # sign the string using the delegation key
+    key = base64decode(delegation_key["Value"])
+    message = collect(codeunits(string_to_sign))
+    signed_string = HTTP.escapeuri(base64encode(hmac_sha256(key, message)))
+
+    # sas token
+    "sp=$signedPermissions&" *
+    "st=$signedStart&" *
+    "se=$signedExpiry&" *
+    "skoid=$signedKeyObjectId&" *
+    "sktid=$signedKeyTenantId&" *
+    "skt=$signedKeyStart&" *
+    "ske=$signedKeyExpiry&" *
+    "sks=$signedKeyService&" *
+    "skv=$signedKeyVersion&" *
+    (isempty(signedIP) ? "" : "sip=$signedIP&") *
+    "spr=$signedProtocol&" *
+    "sv=$signedVersion&" *
+    "sr=$signedResource&" *
+    "sig=$signed_string"
+end
+
+function status(c::AzContainer, b::AbstractString)
+    r_status = @retry c.nretry HTTP.request(
+        "HEAD",
+        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,b))",
+        [
+            "Authorization" => "Bearer $(token(c.session))",
+            "x-ms-version" => API_VERSION
+        ];
+        retry = false,
+        verbose = c.verbose,
+        connect_timeout = c.connect_timeout,
+        readtimeout = c.read_timeout
+    )
+
+    copy_status = HTTP.header(r_status, "x-ms-copy-status")
+    copy_progress = HTTP.header(r_status, "x-ms-copy-progress")
+    copy_reason = HTTP.header(r_status, "x-ms-copy-status-description")
+
+    Dict("status"=>copy_status, "progress"=>copy_progress, "reason"=>copy_reason)
+end
+
+function Base.cp(inc::AzContainer, inb::AbstractString, outc::AzContainer, outb::AbstractString; showprogress=false, async=false)
+    source_url = "https://$(inc.storageaccount).blob.core.windows.net/$(inc.containername)/$(addprefix(inc,inb))"
+
+    if inc.storageaccount != outc.storageaccount
+        sas = generate_user_delegation_sas(inc, inb; permissions="r", start=now(UTC), expiry=now(UTC)+Hour(1))
+        source_url *= "?$sas"
+    end
+
+    headers = [
+        "Authorization" => "Bearer $(token(outc.session))",
+        "x-ms-version" => API_VERSION,
+        "x-ms-copy-source" => source_url
+    ]
+
+    r_copy = @retry inc.nretry HTTP.request(
+        "PUT",
+        "https://$(outc.storageaccount).blob.core.windows.net/$(outc.containername)/$(addprefix(outc,outb))",
+        headers;
+        retry = false,
+        verbose = inc.verbose,
+        connect_timeout = inc.connect_timeout,
+        readtimeout = inc.read_timeout
+    )
+
+    if !async && r_copy.status == 202
+        while true
+            local stat
+            try
+                stat = status(outc, outb)
+            catch
+                @warn "unable to get copy status for blob copy, retrying..."
+                stat = Dict("status"=>"unknown")
+            end
+
+            if stat["status"] == "success"
+                break
+            elseif stat["status"] == "aborted"
+                error("blob copy aborted, dest=$(outc.storageaccount): $(outc.containername)/$(addprefix(outc,outb)), reason=$(stat["reason"])")
+                break
+            elseif stat["status"] == "pending" && showprogress
+                print("copy progress: $(stat["progress"])\r")
+            end
+            sleep(1)
+        end
+    end
+
+    nothing
 end
 
 """
@@ -1193,19 +1380,8 @@ function Base.cp(src::AzContainer, dst::AzContainer)
     mkpath(dst)
 
     blobs = readdir(src)
-    for blob in blobs
-        @retry dst.nretry HTTP.request(
-            "PUT",
-            "https://$(dst.storageaccount).blob.core.windows.net/$(dst.containername)/$(addprefix(dst,blob))",
-            [
-                "Authorization" => "Bearer $(token(dst.session))",
-                "x-ms-version" => API_VERSION,
-                "x-ms-copy-source" => "https://$(src.storageaccount).blob.core.windows.net/$(src.containername)/$(addprefix(src,blob))"
-            ],
-            retry = false,
-            verbose = src.verbose,
-            connect_timeout = src.connect_timeout,
-            readtimeout = src.read_timeout)
+    @sync for blob in blobs
+        @async cp(src, blob, dst, blob)
     end
     nothing
 end
@@ -1240,6 +1416,6 @@ Note that the information stored is global, and not specfic to any one given IO 
 """
 getperf_counters() = @ccall libAzStorage.getperf_counters()::PerfCounters
 
-export AzContainer, containers, readdlm, writedlm
+export AzContainer, containers, readdlm, status, writedlm
 
 end

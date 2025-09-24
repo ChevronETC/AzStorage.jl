@@ -48,6 +48,9 @@ end
 storageaccount = ENV["STORAGE_ACCOUNT"]
 @info "storageaccount=$storageaccount"
 
+storageaccount_too = get(ENV, "STORAGE_ACCOUNT_TOO", "")
+@info "storageaccount_too=$storageaccount_too"
+
 for container in containers(;storageaccount=storageaccount,session=session)
     rm(AzContainer(container;storageaccount=storageaccount,session=session))
 end
@@ -545,7 +548,30 @@ end
     write(c, "foo.txt", "Hello world")
     cp(c, "foo.txt", c, "bar.txt")
     @test read(c, "bar.txt", String) == "Hello world"
+    cp(c, "foo.txt", c, "baz.txt"; async=true)
+    timeout = 30
+    tic = time()
+    while status(c, "baz.txt")["status"] != "success"
+        if time() - tic > timeout
+            error("failed async copy")
+        end
+        sleep(1)
+    end
+    s = status(c, "baz.txt")
     rm(c)
+end
+
+@testset "Container, copy blob to blob, different storage accounts" begin
+    r = uuid4()
+    c1 = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    c1 = robust_mkpath(c1)
+    write(c1, "foo.txt", "Hello world")
+    c2 = AzContainer("foo-$r-o", storageaccount=storageaccount_too, session=session, nthreads=2, nretry=10)
+    c2 = robust_mkpath(c2)
+    cp(c1, "foo.txt", c2, "bar.txt")
+    @test read(c2, "bar.txt", String) == "Hello world"
+    rm(c1)
+    rm(c2)
 end
 
 @testset "Object, copy blob to local file" begin
