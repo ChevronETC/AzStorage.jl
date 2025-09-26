@@ -534,9 +534,11 @@ Serialize and write data to `io::AzObject`.  See serialize(conainer, blobname, d
 Serialization.serialize(o::AzObject, data) = serialize(o.container, o.name, data)
 
 """
-    touch(container, "blobname")
+    touch(c, b)
 
-Create a zero-byte object with name `blobname` in `container::AzContainer`.
+Update the metadata of a blob `b::AbstractString` in container `c::AzContainer`, changing
+the datset's 'LAST MODIFIED' date.  If the blob does not exist, then a zero-byte blob is
+created.
 
 # Example
 ```
@@ -544,7 +546,31 @@ container = AzContainer("mycontainer";storageaccount="mystorageaccount")
 touch(container, "foo")
 ```
 """
-Base.touch(c::AzContainer, o::AbstractString) = write(c, o, "\0")
+function Base.touch(c::AzContainer, o::AbstractString)
+    if !isfile(c, o)
+        write(c, o, "\0")
+    else
+        @retry c.nretry HTTP.request(
+            "PUT",
+            "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=metadata",
+            [
+                "Authorization" => "Bearer $(token(c.session))",
+                "x-ms-version" => API_VERSION,
+                "x-ms-meta-touched" => string(Dates.now(UTC))
+            ];
+            retry = false,
+            verbose = c.verbose,
+            connect_timeout = c.connect_timeout,
+            readtimeout = c.read_timeout)
+    end
+end
+
+"""
+    touch(o)
+
+Update the metadata of a blob `o::AzObject`, changing the dataset's 'LAST MODIFIED' date.
+"""
+Base.touch(o::AzObject) = touch(o.container, o.name)
 
 """
     touch(io::AzObject)
@@ -1416,6 +1442,96 @@ Note that the information stored is global, and not specfic to any one given IO 
 """
 getperf_counters() = @ccall libAzStorage.getperf_counters()::PerfCounters
 
-export AzContainer, containers, readdlm, status, writedlm
+"""
+    tier!(c, b[; tier="Hot"])
+
+Change the storage tier of a blob where `b::AbstractString` is the blob within a
+container `c::AzContainer`, and `tier` is the target access tier which can be one
+of `"Hot"`, `"Cool"`, `"Cold"` and `"Archive"`.
+
+Notes:
+
+* `tier!` throws an HTTP exception as appropriate.  For example an HTTP exception
+with a 409 error code is thrown when a blob has a pending tier change operation.
+"""
+function tier!(c::AzContainer, o::AbstractString; tier="Hot")
+    tier ∈ ("Hot", "Cool", "Cold", "Archive") || error("'tier' must be one of 'Hot','Cool','Cold','Archive'")
+
+    @retry c.nretry HTTP.request(
+        "PUT",
+        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=tier",
+        [
+            "Authorization" => "Bearer $(token(c.session))",
+            "x-ms-access-tier" => tier,
+            "x-ms-version" => API_VERSION
+        ];
+        retry = false,
+        verbose = c.verbose,
+        connect_timeout = c.connect_timeout,
+        readtimeout = c.read_timeout)
+
+    # if we don't touch the blob, then existing lifecycle rules in the container might immediately change its tier back to what it was
+    touch(c, o)
+
+    nothing
+end
+
+"""
+    tier!(o[; tier="Hot"])
+
+Change the storage tier for a blob `o::AzObject`, and `tier` is the target
+access tier which can be one of `"Hot"`, `"Cool"` and `"Archive"`.
+
+Notes:
+
+* `tier!` throws an HTTP exception as appropriate.  For example an HTTP exception
+with a 409 error code is thrown when a blob has a pending tier change operation.
+"""
+tier!(o::AzObject; tier="Hot") = tier!(o.container, o.name; tier)
+
+"""
+    tier!(c[; tier="Hot", ntasks=100])
+
+Change the storage tier for all blobs within a container `c::AzContainer`.  The
+request for each blob in the container will be done asynchronously in batches
+with `ntasks` tasks within each batch.
+
+Notes:
+
+* `tier!` throws an HTTP exception as appropriate.  For example an HTTP exception
+with a 409 error code is thrown when a blob has a pending tier change operation.
+"""
+tier!(c::AzContainer; tier="Hot", ntasks=100) = asyncmap(b->tier!(c, b; tier), readdir(c); ntasks)
+
+"""
+    tier(c, o)
+
+Returns the access tier for a blob `o::AbstractArray` in container `c::AzContainer`.
+"""
+function tier(c::AzContainer, o::AbstractString)
+    r = HTTP.request(
+        "HEAD",
+        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
+        [
+            "Authorization" => "Bearer $(token(c.session))",
+            "x-ms-access-tier" => tier,
+            "x-ms-version" => API_VERSION
+        ];
+        retry = false,
+        verbose = c.verbose,
+        connect_timeout = c.connect_timeout,
+        readtimeout = c.read_timeout)
+
+    HTTP.header(r.headers, "x-ms-access-tier")
+end
+
+"""
+    tier(o)
+
+Returns the access tier for a blob `o::AzObject`.
+"""
+tier(o::AzObject) = tier(o.container, o.name)
+
+export AzContainer, containers, readdlm, status, tier, tier!, writedlm
 
 end

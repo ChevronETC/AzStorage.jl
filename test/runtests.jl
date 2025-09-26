@@ -302,6 +302,34 @@ end
     rm(c)
 end
 
+@testset "Containers and Objects, touch" begin
+    r = uuid4()
+    c = AzContainer("foo-$r"; storageaccount, session)
+    mkpath(c)
+    write(c, "test.txt", "Hello")
+    
+    r1 = HTTP.request("HEAD", "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/test.txt", ["Authorization" => "Bearer $(token(c.session))", "x-ms-version" => AzStorage.API_VERSION])
+    t1 = HTTP.header(r1, "Last-Modified")
+
+    sleep(5)
+
+    touch(c, "test.txt")
+    r2 = HTTP.request("HEAD", "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/test.txt", ["Authorization" => "Bearer $(token(c.session))", "x-ms-version" => AzStorage.API_VERSION])
+    t2 = HTTP.header(r2, "Last-Modified")
+
+    @test t1 != t2
+
+    sleep(5)
+
+    touch(joinpath(c, "test.txt"))
+    r3 = HTTP.request("HEAD", "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/test.txt", ["Authorization" => "Bearer $(token(c.session))", "x-ms-version" => AzStorage.API_VERSION])
+    t3 = HTTP.header(r3, "Last-Modified")
+
+    @test t3 != t2
+
+    rm(c)
+end
+
 @testset "isdir, edge case" begin
     c = AzContainer(""; storageaccount="", session=session)
     @test isdir(c) == false
@@ -691,6 +719,40 @@ end
     write(c, "test", x)
     y = read!(c, "test", zeros(Float64, 1000); serial=true)
     @test x ≈ y
+end
+
+@testset "get access tier, blob" begin
+    r = uuid4()
+    c = AzContainer("foo-$r"; storageaccount, session)
+    mkpath(c)
+    write(c, "test.txt", "Hello")
+    @test tier(c, "test.txt") == "Hot"
+    @test tier(joinpath(c, "test.txt")) == "Hot"
+    rm(c)
+end
+
+@testset "set access tier, blob" begin
+    r = uuid4()
+    c = AzContainer("foo-$r"; storageaccount, session)
+    mkpath(c)
+    write(c, "test.txt", "Hello")
+    tier!(c, "test.txt"; tier="Cold")
+    @test tier(c, "test.txt") == "Cold"
+    tier!(joinpath(c, "test.txt"); tier="Hot")
+    @test tier(c, "test.txt") == "Hot"
+    rm(c)
+end
+
+@testset "set access tier, container" begin
+    r = uuid4()
+    c = AzContainer("foo-$r"; storageaccount, session)
+    mkpath(c)
+    write(c, "test1.txt", "Hello")
+    write(c, "test2.txt", "Goodbye")
+    tier!(c; tier="Cold")
+    @test tier(c, "test1.txt") == "Cold"
+    @test tier(c, "test2.txt") == "Cold"
+    rm(c)
 end
 
 # TODO: CI is showing a seg-fault on Apple, but I do not have an Apple machine to help debug.
