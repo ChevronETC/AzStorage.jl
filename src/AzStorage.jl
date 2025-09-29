@@ -573,13 +573,6 @@ Update the metadata of a blob `o::AzObject`, changing the dataset's 'LAST MODIFI
 Base.touch(o::AzObject) = touch(o.container, o.name)
 
 """
-    touch(io::AzObject)
-
-Create a zero-byte object for `io`.  See `touch(container::AzContainer, blobname)`.
-"""
-Base.touch(o::AzObject) = touch(o.container, o.name)
-
-"""
     writedlm(container, "blobname", data, args...; options...)
 
 Write the array `data` to a delimited blob with the name `blobname` in container `container::AzContainer`
