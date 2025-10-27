@@ -81,6 +81,9 @@ cp("mylocalfile.bin", io)
 io2 = open(AzContainer("foo"; storageaccount="mystorageaccount", session), "mycopyblob.bin")
 cp(io, io2)
 
+# get the container (similar to getting the root path of a POSIX filename)
+dirname(io)
+
 # remove the blob
 rm(io)
 ```

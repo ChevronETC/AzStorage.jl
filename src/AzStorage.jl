@@ -103,6 +103,13 @@ write(io, rand(10))
 Base.joinpath(container::AzContainer, name...) = open(container, join(name, '/'), false)
 
 """
+    dirname(object::AzObject) -> AzContainer
+
+returns the container/prefix of the `object::AzObject`.
+"""
+Base.dirname(object::AzObject) = object.container
+
+"""
     open(object::AzObject[, mode="w+"]) -> object
 
 This is an identity operation to support compatability with POSIX I/O. It allows for the

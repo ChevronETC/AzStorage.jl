@@ -396,6 +396,19 @@ end
     c = AzContainer(""; storageaccount="", session=session, nthreads=2, nretry=10)
     io = joinpath(c, "bar", "baz")
     @test isfile(io) == false
+    rm(c)
+end
+
+@testset "Object, dirname" begin
+    r = uuid4()
+    c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    io = robust_joinpath(c, "bar", "baz")
+    _c = dirname(io)
+    @test isa(_c, AzContainer)
+    @test _c.storageaccount == c.storageaccount
+    @test _c.containername == c.containername
+    @test _c.prefix == c.prefix
+    rm(c)
 end
 
 @testset "Object, open" begin
