@@ -268,7 +268,7 @@ end
     r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     c = robust_mkpath(c)
-    _c = Container(AzContainer, JSON.parse(json(c)), c.session)
+    _c = Container(AzContainer, JSON.parse(JSON.json(c); dicttype=Dict), c.session)
     @test _c.storageaccount == storageaccount
     @test _c.containername == "foo-$r-k"
     @test _c.nretry == 10
