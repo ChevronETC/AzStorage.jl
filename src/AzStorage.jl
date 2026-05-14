@@ -219,7 +219,7 @@ macro retry(retries, ex::Expr)
                 maximum_backoff = 256
                 s = min(2.0^(i-1), maximum_backoff) + rand()
                 found_retry_after = false
-                if status(e) == 429
+                if status(e) ∈ (429, 503)
                     j = findfirst(header->header[1] == "Retry-After", e.response.headers)
                     if j !== nothing
                         s = parse(Int, e.response.headers[j][2]) + rand()
