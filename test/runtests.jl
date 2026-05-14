@@ -69,6 +69,54 @@ sleep(60)
     @test y == [6,7,28,35,42,55,56]
 end
 
+@testset "Retry macro, 429 with Retry-After header" begin
+    # Simulate a 429 response with a Retry-After header
+    call_count = 0
+    function mock_operation()
+        call_count += 1
+        if call_count <= 2
+            response = HTTP.Response(429, ["Retry-After" => "1"])
+            throw(HTTP.StatusError(429, "GET", "https://test.blob.core.windows.net/", response))
+        end
+        return :success
+    end
+
+    result = AzStorage.@retry 5 mock_operation()
+    @test result == :success
+    @test call_count == 3
+end
+
+@testset "Retry macro, 429 without Retry-After header" begin
+    call_count = 0
+    function mock_operation2()
+        call_count += 1
+        if call_count <= 1
+            response = HTTP.Response(429, ["x-ms-request-id" => "abc"])
+            throw(HTTP.StatusError(429, "GET", "https://test.blob.core.windows.net/", response))
+        end
+        return :success
+    end
+
+    result = AzStorage.@retry 3 mock_operation2()
+    @test result == :success
+    @test call_count == 2
+end
+
+@testset "Retry macro, retryable HTTP status error" begin
+    call_count = 0
+    function mock_operation3()
+        call_count += 1
+        if call_count <= 2
+            response = HTTP.Response(500)
+            throw(HTTP.StatusError(500, "GET", "https://test.blob.core.windows.net/", response))
+        end
+        return :success
+    end
+    result = AzStorage.@retry 3 mock_operation3()
+    @test result == :success
+    @test call_count == 3
+end
+
 @testset "Containers, equivalent" begin
     x = AzContainer("foo/bar"; storageaccount="baz", nthreads=10, session=session)
     y = AzContainer("foo/bar"; storageaccount="baz", nthreads=11, session=session)
