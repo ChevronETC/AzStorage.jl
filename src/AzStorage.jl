@@ -203,8 +203,8 @@ azstorage_exception(e) = e
 status(e::HTTP.StatusError) = e.status
 status(e) = 999
 
-function retrywarn(i, s, e)
-    @debug "retry $i, sleeping for $s seconds, e=$e"
+function retrywarn(i, s, found_retry_after, e)
+    @debug "retry $i, sleeping for $s seconds $(found_retry_after ? "(429 throttling)" : ""), e=$e"
 end
 
 macro retry(retries, ex::Expr)
@@ -218,13 +218,15 @@ macro retry(retries, ex::Expr)
                 (i < $(esc(retries)) && isretryable(e)) || throw(azstorage_exception(e))
                 maximum_backoff = 256
                 s = min(2.0^(i-1), maximum_backoff) + rand()
+                found_retry_after = false
                 if status(e) == 429
                     j = findfirst(header->header[1] == "Retry-After", e.response.headers)
                     if j !== nothing
                         s = parse(Int, e.response.headers[j][2]) + rand()
+                        found_retry_after = true
                     end
                 end
-                retrywarn(i, s, e)
+                retrywarn(i, s, found_retry_after, e)
                 sleep(s)
             end
         end

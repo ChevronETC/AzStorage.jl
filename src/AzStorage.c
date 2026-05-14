@@ -672,7 +672,7 @@ curl_writebytes_block(
     curl_easy_getinfo(curlhandle, CURLINFO_RESPONSE_CODE, &responsecode_http);
 
     if ( (responsecode_curl != CURLE_OK || responsecode_http >= 300) && verbose > 0) {
-        printf("Warning, curl response=%s, http response code=%ld\n", errbuf, responsecode_http);
+        printf("Warning, curl response=%s, http response code=%ld, retry_after=%d\n", errbuf, responsecode_http, header_data.retry_after);
     }
 
     curl_easy_cleanup(curlhandle);
@@ -716,7 +716,7 @@ curl_writebytes_block_retry(
             break;
         }
         if (verbose > 0) {
-            printf("Warning, bad write, retrying, %d/%d, http_responsecode=%ld, curl_responsecode=%ld.\n", iretry+1, nretry, responsecodes.http, responsecodes.curl);
+            printf("Warning, bad write, retrying, %d/%d, http_responsecode=%ld, curl_responsecode=%ld, retry_after=%d.\n", iretry+1, nretry, responsecodes.http, responsecodes.curl, responsecodes.retry_after);
         }
         if (exponential_backoff(iretry, responsecodes.retry_after) != 0) {
             printf("Warning, unable to sleep in exponential backoff.\n");
@@ -892,7 +892,7 @@ curl_readbytes(
     curl_easy_getinfo(curlhandle, CURLINFO_RESPONSE_CODE, &responsecode_http);
 
     if ( (responsecode_curl != CURLE_OK || responsecode_http >= 300) && verbose > 0) {
-        printf("Error, bad read, http response code=%ld, curl response=%s\n", responsecode_http, errbuf);
+        printf("Error, bad read, http response code=%ld, curl response=%s, retry_after=%d\n", responsecode_http, errbuf, header_data.retry_after);
     }
 
     curl_easy_cleanup(curlhandle);
