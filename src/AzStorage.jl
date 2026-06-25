@@ -844,7 +844,7 @@ function Base.cp(in::AbstractString, outc::AzContainer, outb::AbstractString; bu
                 nbytes_buffer = 0
             end
             progress.core.desc = @sprintf "read/write = %.2f/%.2f MB/s" speed_read speed_write
-            next!(progress)
+            ProgressMeter.next!(progress)
         end
         wait(tsk_write)
         putblocklist(outc, outb, _blockids)
@@ -876,7 +876,7 @@ function Base.cp(inc::AzContainer, inb::AbstractString, out::AbstractString; buf
             speed_write = (__buffersize_write / 1_000_000) / t_write
         end
         progress.core.desc = @sprintf "read/write = %.2f/%.2f MB/s" speed_read speed_write
-        next!(progress)
+        ProgressMeter.next!(progress)
     end
     wait(tsk_write)
     close(io)
