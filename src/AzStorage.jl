@@ -1336,6 +1336,49 @@ Returns the size of the blob corresponding to `object::AzObject`
 Base.filesize(o::AzObject) = filesize(o.container, o.name)
 
 """
+    metadata(container, "blobname")
+
+Returns a dictionary corresponding to the metadata of the blob "blobname" in `container::AzContainer`.  The dictionary contains the following keys:
+
+* "size": The size of the blob in bytes.
+* "modified": The last modified date of the blob.
+* "created": The creation date of the blob.
+* "accessed": The last access date of the blob.
+"""
+function metadata(c::AzContainer, o::AbstractString)
+    r = @retry c.nretry HTTP.request(
+        "HEAD",
+        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
+        [
+            "Authorization" => "Bearer $(token(c.session))",
+            "x-ms-version" => API_VERSION
+        ],
+        retry = false,
+        verbose = c.verbose,
+        connect_timeout = c.connect_timeout,
+        readtimeout = c.read_timeout)
+
+    Dict(
+        "size" => parse(Int, HTTP.header(r, "Content-Length", "0")),
+        "modified" => tryparse(DateTime, HTTP.header(r, "Last-Modified", "not a date"), dateformat"e, dd u yyyy HH:MM:SS \G\M\T"),
+        "created" => tryparse(DateTime, HTTP.header(r, "x-ms-creation-time", "not a date"), dateformat"e, dd u yyyy HH:MM:SS \G\M\T"),
+        "accessed" => tryparse(DateTime, HTTP.header(r, "x-ms-last-access-time", "not a date"), dateformat"e, dd u yyyy HH:MM:SS \G\M\T")
+    )
+end
+
+"""
+    metadata(object::AzObject)
+
+Returns a dictionary corresponding to the metadata of the blob corresponding to `object::AzObject`.  The dictionary contains the following keys:
+
+* "size": The size of the blob in bytes.
+* "modified": The last modified date of the blob.
+* "created": The creation date of the blob.
+* "accessed": The last access date of the blob.
+"""
+metadata(o::AzObject) = metadata(o.container, o.name)
+
+"""
     rm(container, "blobname")
 
 remove the blob "blobname" from `container::AzContainer`.
@@ -1540,6 +1583,6 @@ Returns the access tier for a blob `o::AzObject`.
 """
 tier(o::AzObject) = tier(o.container, o.name)
 
-export AzContainer, containers, readdlm, status, tier, tier!, writedlm
+export AzContainer, containers, metadata, readdlm, status, tier, tier!, writedlm
 
 end
