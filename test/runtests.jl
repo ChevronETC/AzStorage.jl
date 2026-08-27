@@ -294,6 +294,33 @@ end
     rm(c)
 end
 
+@testset "Containers, rm, quiet keyword, prefix=$prefix" for prefix in ("prefix","")
+    r = uuid4()
+    suffix = prefix == "" ? "-foo" : "-bar"
+    c = AzContainer("foo-$r-rmq$suffix", prefix=prefix, storageaccount=storageaccount, session=session)
+    c = robust_mkpath(c)
+    write(c, "bar", "bar\n")
+
+    # default (quiet=true) swallows the error when the blob is missing
+    @test rm(c, "baz") === nothing
+
+    # quiet=false surfaces the error when the blob is missing
+    @test_throws Exception rm(c, "baz"; quiet=false)
+
+    # quiet=false succeeds when the blob exists
+    @test rm(c, "bar"; quiet=false) === nothing
+    @test !isfile(c, "bar")
+
+    # the object-level method forwards the quiet keyword
+    io = robust_open(c, "qux")
+    write(io, "qux\n")
+    @test isfile(io)
+    @test rm(io; quiet=false) === nothing
+    @test !isfile(io)
+
+    rm(c)
+end
+
 @testset "Containers, isfile, prefix=$prefix" for prefix in ("","prefix")
     r = uuid4()
     suffix = prefix == "" ? "-foo" : "-bar"

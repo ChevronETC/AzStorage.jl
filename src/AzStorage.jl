@@ -1379,11 +1379,14 @@ Returns a dictionary corresponding to the metadata of the blob corresponding to 
 metadata(o::AzObject) = metadata(o.container, o.name)
 
 """
-    rm(container, "blobname")
+    rm(container, "blobname"; quiet=true)
 
 remove the blob "blobname" from `container::AzContainer`.
+
+By default (`quiet=true`) a failed removal is logged via `@warn` and otherwise
+ignored.  Pass `quiet=false` to rethrow the underlying error instead.
 """
-function Base.rm(c::AzContainer, o::AbstractString)
+function Base.rm(c::AzContainer, o::AbstractString; quiet=true)
     try
         @retry c.nretry HTTP.request(
             "DELETE",
@@ -1397,27 +1400,34 @@ function Base.rm(c::AzContainer, o::AbstractString)
             connect_timeout = c.connect_timeout,
             readtimeout = c.read_timeout)
     catch
+        quiet || rethrow()
         @warn "error removing $(c.containername)/$(addprefix(c,o))"
     end
     nothing
 end
 
 """
-    rm(object::AzObject; force=false)
+    rm(object::AzObject; force=false, quiet=true)
 
 remove the blob corresponding to `object::AzObject`.  Note that
 the `force` keyword argument does not change the behavior of this
 method.  It is included to match Julia's `Base.rm` method, allowing
 the calling code to work on both POSIX and Azure storage.
+
+By default (`quiet=true`) a failed removal is logged and ignored; pass
+`quiet=false` to rethrow the underlying error.
 """
-Base.rm(o::AzObject; force=false) = rm(o.container, o.name)
+Base.rm(o::AzObject; force=false, quiet=true) = rm(o.container, o.name; quiet)
 
 """
-    rm(container)
+    rm(container; quiet=true)
 
 remove `container::AzContainer` and all of its blobs.
+
+By default (`quiet=true`) failures are logged and ignored; pass `quiet=false`
+to rethrow the underlying error.
 """
-function Base.rm(c::AzContainer)
+function Base.rm(c::AzContainer; quiet=true)
     function _rm(c::AzContainer)
         @retry c.nretry HTTP.request(
             "DELETE",
@@ -1437,11 +1447,12 @@ function Base.rm(c::AzContainer)
             _rm(c)
         else
             for o in readdir(c)
-                rm(c, o)
+                rm(c, o; quiet)
             end
             isempty(readdir(c; filterlist=false)) && _rm(c)
         end
     catch
+        quiet || rethrow()
         @warn "error removing $(c.containername)"
     end
 
