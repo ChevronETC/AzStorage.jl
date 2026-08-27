@@ -220,6 +220,21 @@ end
     rm(c)
 end
 
+@testset "Containers, metadata, prefix=$prefix" for prefix in ("", "prefix")
+    suffix = prefix == "" ? "-foo" : "-bar"
+    r = uuid4()
+    c = AzContainer("foo-$r-f$suffix", prefix=prefix, storageaccount=storageaccount, session=session)
+    c = robust_mkpath(c)
+
+    write(c, "bar", rand(UInt8,10))
+
+    m = metadata(c, "bar")
+    @test m["size"] == 10
+    @test isa(m["created"], DateTime)
+    @test isa(m["modified"], DateTime) || isa(m["modified"], Nothing)
+    @test isa(m["accessed"], DateTime) || isa(m["accessed"], Nothing)
+end
+
 @testset "Containers, bytes, nthreads=$nthreads, prefix=$prefix" for nthreads in (1, 2), prefix in ("","prefix")
     suffix = prefix == "" ? "-foo" : "-bar"
     r = uuid4()
