@@ -1505,65 +1505,78 @@ Note that the information stored is global, and not specfic to any one given IO 
 getperf_counters() = @ccall libAzStorage.getperf_counters()::PerfCounters
 
 """
-    tier!(c, b[; tier="Hot"])
+    tier!(c, b[; tier="Hot", rehydrate_priority=nothing])
 
 Change the storage tier of a blob where `b::AbstractString` is the blob within a
 container `c::AzContainer`, and `tier` is the target access tier which can be one
 of `"Hot"`, `"Cool"`, `"Cold"` and `"Archive"`.
 
+`rehydrate_priority` (`"Standard"` or `"High"`) sets the priority used to rehydrate an
+archived blob back to a warmer tier; it is ignored when `tier == "Archive"`.
+
 Notes:
 
 * `tier!` throws an HTTP exception as appropriate.  For example an HTTP exception
 with a 409 error code is thrown when a blob has a pending tier change operation.
 """
-function tier!(c::AzContainer, o::AbstractString; tier="Hot")
+function tier!(c::AzContainer, o::AbstractString; tier="Hot", rehydrate_priority=nothing)
     tier ∈ ("Hot", "Cool", "Cold", "Archive") || error("'tier' must be one of 'Hot','Cool','Cold','Archive'")
+    rehydrate_priority ∈ (nothing, "Standard", "High") || error("'rehydrate_priority' must be one of 'Standard','High'")
 
-    @retry c.nretry HTTP.request(
+    headers = [
+        "Authorization" => "Bearer $(token(c.session))",
+        "x-ms-access-tier" => tier,
+        "x-ms-version" => API_VERSION
+    ]
+    # rehydrate priority only applies when moving a blob *out* of Archive to a warmer tier
+    (rehydrate_priority === nothing || tier == "Archive") || push!(headers, "x-ms-rehydrate-priority" => rehydrate_priority)
+
+    r = @retry c.nretry HTTP.request(
         "PUT",
         "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=tier",
-        [
-            "Authorization" => "Bearer $(token(c.session))",
-            "x-ms-access-tier" => tier,
-            "x-ms-version" => API_VERSION
-        ];
+        headers;
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
         readtimeout = c.read_timeout)
 
-    # if we don't touch the blob, then existing lifecycle rules in the container might immediately change its tier back to what it was
-    touch(c, o)
+    # touching resets the lifecycle-rule clock so a rule doesn't immediately re-tier the blob back.
+    # we can't touch an archived blob, so skip it both when archiving (tier=="Archive") and when a
+    # rehydration was merely initiated (HTTP 202 -> the blob stays in Archive for hours)
+    (tier == "Archive" || r.status == 202) || touch(c, o)
 
     nothing
 end
 
 """
-    tier!(o[; tier="Hot"])
+    tier!(o[; tier="Hot", rehydrate_priority=nothing])
 
 Change the storage tier for a blob `o::AzObject`, and `tier` is the target
 access tier which can be one of `"Hot"`, `"Cool"` and `"Archive"`.
+`rehydrate_priority` (`"Standard"` or `"High"`) sets the rehydration priority when
+moving out of Archive.
 
 Notes:
 
 * `tier!` throws an HTTP exception as appropriate.  For example an HTTP exception
 with a 409 error code is thrown when a blob has a pending tier change operation.
 """
-tier!(o::AzObject; tier="Hot") = tier!(o.container, o.name; tier)
+tier!(o::AzObject; tier="Hot", rehydrate_priority=nothing) = tier!(o.container, o.name; tier, rehydrate_priority)
 
 """
-    tier!(c[; tier="Hot", ntasks=100])
+    tier!(c[; tier="Hot", rehydrate_priority=nothing, ntasks=100])
 
 Change the storage tier for all blobs within a container `c::AzContainer`.  The
 request for each blob in the container will be done asynchronously in batches
-with `ntasks` tasks within each batch.
+with `ntasks` tasks within each batch.  `rehydrate_priority` (`"Standard"` or
+`"High"`) sets the rehydration priority when moving out of Archive.
 
 Notes:
 
 * `tier!` throws an HTTP exception as appropriate.  For example an HTTP exception
 with a 409 error code is thrown when a blob has a pending tier change operation.
 """
-tier!(c::AzContainer; tier="Hot", ntasks=100) = asyncmap(b->tier!(c, b; tier), readdir(c); ntasks)
+tier!(c::AzContainer; tier="Hot", rehydrate_priority=nothing, ntasks=100) = asyncmap(b->tier!(c, b; tier, rehydrate_priority), readdir(c); ntasks)
 
 """
     tier(c, o)
@@ -1576,7 +1589,6 @@ function tier(c::AzContainer, o::AbstractString)
         "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
         [
             "Authorization" => "Bearer $(token(c.session))",
-            "x-ms-access-tier" => tier,
             "x-ms-version" => API_VERSION
         ];
         retry = false,
