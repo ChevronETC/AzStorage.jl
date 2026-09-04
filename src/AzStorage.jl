@@ -1533,7 +1533,8 @@ function tier!(c::AzContainer, o::AbstractString; tier="Hot")
         readtimeout = c.read_timeout)
 
     # if we don't touch the blob, then existing lifecycle rules in the container might immediately change its tier back to what it was
-    touch(c, o)
+    # (we can't touch an archived blob)
+    tier == "Archive" || touch(c, o)
 
     nothing
 end
@@ -1576,7 +1577,6 @@ function tier(c::AzContainer, o::AbstractString)
         "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
         [
             "Authorization" => "Bearer $(token(c.session))",
-            "x-ms-access-tier" => tier,
             "x-ms-version" => API_VERSION
         ];
         retry = false,
