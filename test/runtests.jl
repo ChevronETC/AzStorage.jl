@@ -75,8 +75,8 @@ end
     function mock_operation()
         call_count += 1
         if call_count <= 2
-            response = HTTP.Response(429, ["Retry-After" => "1"])
-            throw(HTTP.StatusError(429, "GET", "https://test.blob.core.windows.net/", response))
+            response = HTTP.Response(429; headers=["Retry-After" => "1"])
+            throw(HTTP.StatusError(429, response))
         end
         return :success
     end
@@ -92,7 +92,7 @@ end
         call_count += 1
         if call_count <= 1
             response = HTTP.Response(429, ["x-ms-request-id" => "abc"])
-            throw(HTTP.StatusError(429, "GET", "https://test.blob.core.windows.net/", response))
+            throw(HTTP.StatusError(429, response))
         end
         return :success
     end
@@ -108,7 +108,7 @@ end
         call_count += 1
         if call_count <= 2
             response = HTTP.Response(500)
-            throw(HTTP.StatusError(500, "GET", "https://test.blob.core.windows.net/", response))
+            throw(HTTP.StatusError(500, response))
         end
         return :success
     end

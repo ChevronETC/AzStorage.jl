@@ -1,6 +1,6 @@
 name = "AzStorage"
 uuid = "c6697862-1611-5eae-9ef8-48803c85c8d6"
-version = "2.11.0"
+version = "2.12.0"
 
 [deps]
 AbstractStorage = "14dbef02-f468-5f15-853e-5ec8dee7b899"
@@ -23,7 +23,7 @@ AzSessions = "2"
 AzStorage_jll = "0.9"
 Base64 = "1"
 DelimitedFiles = "1"
-HTTP = "1"
+HTTP = "2"
 ProgressMeter = "1"
 SHA = "0.7"
 XML = "0.3"
