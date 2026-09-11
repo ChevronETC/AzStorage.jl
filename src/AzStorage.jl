@@ -184,14 +184,13 @@ function isretryable(e::HTTP.StatusError)
 end
 
 # HTTP 2's DNSError exposes only a resolver message (no EAI code), so match the "host not found" text.
-const _DNS_NOTFOUND_MARKERS = ("Name or service not known", "No such host is known", "nodename nor servname", "Name does not resolve")
-isnoname_error(e::HTTP.DNSError) = any(marker -> occursin(marker, sprint(showerror, e)), _DNS_NOTFOUND_MARKERS)
-isnoname_error(e) = false
+const _DNS_NOTFOUND_MARKERS = ("Name or service not known", "No such host is known", "nodename nor servname", "Name does not resolve", "no such host", "lookup failed")
+isnoname_error(e) = any(marker -> occursin(lowercase(marker), lowercase(sprint(showerror, e))), _DNS_NOTFOUND_MARKERS)
 
 isretryable(e::HTTP.DNSError) = isnoname_error(e) ? false : true
-isretryable(e::HTTP.ConnectError) = true
+isretryable(e::HTTP.ConnectError) = isnoname_error(e) ? false : true
 isretryable(e::HTTP.TimeoutError) = true
-isretryable(e::HTTP.HTTPError) = true
+isretryable(e::HTTP.HTTPError) = isnoname_error(e) ? false : true
 isretryable(e::Base.IOError) = true
 isretryable(e::Base.EOFError) = true
 isretryable(e::Sockets.DNSError) = Base.uverrorname(e.code) == "EAI_NONAME" ? false : true
@@ -311,7 +310,7 @@ function Base.mkpath(c::AzContainer)
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            readtimeout = c.read_timeout)
+            read_idle_timeout = c.read_timeout)
     end
     nothing
 end
@@ -350,21 +349,19 @@ function writebytes_blob(c, o, data, contenttype)
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        readtimeout = c.read_timeout)
+        read_idle_timeout = c.read_timeout)
     nothing
 end
 
+# text of a leaf element like <Name>foo</Name>; "" for an empty element like <NextMarker/>
+_elementtext(node) = isempty(children(node)) ? "" : value(first(children(node)))
+
 function isinvalidblocklist(e)
     b = XML.parse(String(e.response.body), LazyNode)
-    for child in children(b)
-        if tag(child) == "Error"
-            for grandchild in children(child)
-                if tag(grandchild) == "Code"
-                    if value(first(children(grandchild))) == "InvalidBlockList"
-                        return true
-                    end
-                end
-            end
+    for err in elements(b)
+        tag(err) == "Error" || continue
+        for code in elements(err)
+            tag(code) == "Code" && _elementtext(code) == "InvalidBlockList" && return true
         end
     end
     false
@@ -381,27 +378,21 @@ function committed_blocklist(c, o)
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        readtimeout = c.read_timeout
+        read_idle_timeout = c.read_timeout
     )
 
     b = XML.parse(String(r.body), LazyNode)
     committedblocks = String[]
-    for child in children(b)
-        if tag(child) == "BlockList"
-            for grandchild in children(child)
-                if tag(grandchild) == "CommittedBlocks"
-                    for greatgrandchild in children(grandchild)
-                        for greatgreatgrandchild in children(greatgrandchild)
-                            if tag(greatgreatgrandchild) == "Name"
-                                push!(committedblocks, value(first(children(greatgreatgrandchild))))
-                                break
-                            end
-                        end
-                    end
+    for blocklist in elements(b)
+        tag(blocklist) == "BlockList" || continue
+        for committed in elements(blocklist)
+            tag(committed) == "CommittedBlocks" || continue
+            for block in elements(committed)
+                tag(block) == "Block" || continue
+                for nm in elements(block)
+                    tag(nm) == "Name" && (push!(committedblocks, _elementtext(nm)); break)
                 end
-                break
             end
-            break
         end
     end
     committedblocks
@@ -412,7 +403,7 @@ function putblocklist(c, o, blockids)
     for blockid in blockids
         push!(xroot, XML.Element("Uncommitted", blockid))
     end
-    xdoc = XML.Document(XML.Declaration(version=1.0, encoding="UTF-8"), xroot)
+    xdoc = XML.Document(XML.Declaration(version="1.0", encoding="UTF-8"), xroot)
     blocklist = XML.write(xdoc; indentsize=0)
 
     try
@@ -429,7 +420,7 @@ function putblocklist(c, o, blockids)
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            readtimeout = c.read_timeout)
+            read_idle_timeout = c.read_timeout)
     catch e
         isa(e, HTTP.StatusError) || throw(e)
 
@@ -912,12 +903,11 @@ function get_user_delegation_key(c::AzContainer; start=now(UTC), expiry=now(UTC)
 
     b = XML.parse(String(r.body), LazyNode)
     delegation_key = Dict{String,String}()
-    for child in children(b)
-        if tag(child) == "UserDelegationKey"
-            for grandchild in children(child)
-                if tag(grandchild) in ("SignedOid", "SignedTid", "SignedStart", "SignedExpiry", "SignedService", "SignedVersion", "Value")
-                    delegation_key[string(tag(grandchild))] = value(first(children(grandchild)))
-                end
+    for udk in elements(b)
+        tag(udk) == "UserDelegationKey" || continue
+        for field in elements(udk)
+            if tag(field) in ("SignedOid", "SignedTid", "SignedStart", "SignedExpiry", "SignedService", "SignedVersion", "Value")
+                delegation_key[string(tag(field))] = _elementtext(field)
             end
         end
     end
@@ -1137,12 +1127,16 @@ function Base.readdir(c::AzContainer; filterlist=true)
             read_idle_timeout = c.read_timeout)
 
         xdoc = XML.parse(LazyNode, String(r.body))
-        for node in children(xdoc)
+        for node in elements(xdoc)
             if tag(node) == "EnumerationResults"
-                for _node in children(node)
+                for _node in elements(node)
                     if tag(_node) == "Blobs"
-                         for __node in children(_node)
-                            name = value(first(children(first(children(__node)))))
+                        for blob in elements(_node)
+                            tag(blob) == "Blob" || continue
+                            name = ""
+                            for nm in elements(blob)
+                                tag(nm) == "Name" && (name = _elementtext(nm); break)
+                            end
                             if filterlist
                                 push!(names, replace(name, _normpath(c.prefix*"/")=>""))
                             else
@@ -1150,7 +1144,7 @@ function Base.readdir(c::AzContainer; filterlist=true)
                             end
                         end
                     elseif tag(_node) == "NextMarker"
-                       marker = isempty(children(_node)) ? "" : value(first(children(_node)))
+                        marker = _elementtext(_node)
                     end
                 end
                 break
@@ -1277,21 +1271,21 @@ function containers(;storageaccount, session=AzSession(;lazy=false, scope=__OAUT
             read_idle_timeout = read_timeout)
 
         xdoc = XML.parse(LazyNode, String(r.body))
-        for node in children(xdoc)
+        for node in elements(xdoc)
             if tag(node) == "EnumerationResults"
-                for _node in children(node)
+                for _node in elements(node)
                     if tag(_node) == "Containers"
-                        for __node in children(_node)
-                            for ___node in children(__node)
-                                if tag(___node) == "Name"
-                                    name = value(first(children(___node)))
-                                    push!(containernames, name)
+                        for container in elements(_node)
+                            tag(container) == "Container" || continue
+                            for nm in elements(container)
+                                if tag(nm) == "Name"
+                                    push!(containernames, _elementtext(nm))
                                     break
                                 end
                             end
                         end
                     elseif tag(_node) == "NextMarker"
-                        marker = isempty(children(_node)) ? "" : value(first(children(_node)))
+                        marker = _elementtext(_node)
                     end
                 end
             end
