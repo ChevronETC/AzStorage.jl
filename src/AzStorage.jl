@@ -182,21 +182,20 @@ function isretryable(e::HTTP.StatusError)
     e.status ∈ RETRYABLE_HTTP_ERRORS && (return true)
     false
 end
-function isretryable(e::HTTP.RequestError)
-    e.request.response.status == 404 && (return false)
-    true
-end
-isnoname_error(e::HTTP.Exceptions.ConnectError) = isa(e.error, CapturedException) && isa(e.error.ex, Sockets.DNSError) && Base.uverrorname(e.error.ex.code) == "EAI_NONAME"
-isnoname_error(e) = false
-isretryable(e::HTTP.Exceptions.ConnectError) = isnoname_error(e) ? false : true
+
+# HTTP 2's DNSError exposes only a resolver message (no EAI code), so match the "host not found" text.
+const _DNS_NOTFOUND_MARKERS = ("Name or service not known", "No such host is known", "nodename nor servname", "Name does not resolve", "no such host", "lookup failed")
+isnoname_error(e) = any(marker -> occursin(lowercase(marker), lowercase(sprint(showerror, e))), _DNS_NOTFOUND_MARKERS)
+
+isretryable(e::HTTP.DNSError) = isnoname_error(e) ? false : true
+isretryable(e::HTTP.ConnectError) = isnoname_error(e) ? false : true
+isretryable(e::HTTP.TimeoutError) = true
+isretryable(e::HTTP.HTTPError) = isnoname_error(e) ? false : true
 isretryable(e::Base.IOError) = true
-isretryable(e::HTTP.Exceptions.HTTPError) = true
-isretryable(e::HTTP.Exceptions.TimeoutError) = true
 isretryable(e::Base.EOFError) = true
 isretryable(e::Sockets.DNSError) = Base.uverrorname(e.code) == "EAI_NONAME" ? false : true
 isretryable(e) = false
 
-azstorage_exception(e::HTTP.RequestError) = e.request.response.status == 404 ? FileDoesNotExistError() : e
 azstorage_exception(e::HTTP.StatusError) = e.status == 404 ? FileDoesNotExistError() : e
 azstorage_exception(e) = e
 
@@ -220,7 +219,7 @@ macro retry(retries, ex::Expr)
                 s = min(2.0^(i-1), maximum_backoff) + rand()
                 found_retry_after = false
                 if status(e) ∈ (429, 503)
-                    j = findfirst(header->header[1] == "Retry-After", e.response.headers)
+                    j = findfirst(header->lowercase(header[1]) == "retry-after", e.response.headers)
                     if j !== nothing
                         s = parse(Int, e.response.headers[j][2]) + rand()
                         found_retry_after = true
@@ -307,11 +306,11 @@ function Base.mkpath(c::AzContainer)
             [
                 "Authorization" => "Bearer $(token(c.session))",
                 "x-ms-version" => API_VERSION
-            ],
+            ];
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            readtimeout = c.read_timeout)
+            read_idle_timeout = c.read_timeout)
     end
     nothing
 end
@@ -346,25 +345,23 @@ function writebytes_blob(c, o, data, contenttype)
             "Content-Type" => contenttype,
             "x-ms-blob-type" => "BlockBlob"
         ],
-        data,
+        data;
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        readtimeout = c.read_timeout)
+        read_idle_timeout = c.read_timeout)
     nothing
 end
 
+# text of a leaf element like <Name>foo</Name>; "" for an empty element like <NextMarker/>
+_elementtext(node) = isempty(children(node)) ? "" : value(first(children(node)))
+
 function isinvalidblocklist(e)
     b = XML.parse(String(e.response.body), LazyNode)
-    for child in children(b)
-        if tag(child) == "Error"
-            for grandchild in children(child)
-                if tag(grandchild) == "Code"
-                    if value(first(children(grandchild))) == "InvalidBlockList"
-                        return true
-                    end
-                end
-            end
+    for err in elements(b)
+        tag(err) == "Error" || continue
+        for code in elements(err)
+            tag(code) == "Code" && _elementtext(code) == "InvalidBlockList" && return true
         end
     end
     false
@@ -377,31 +374,25 @@ function committed_blocklist(c, o)
         [
             "x-ms-version" => API_VERSION,
             "Authorization" => "Bearer $(token(c.session))"
-        ],
+        ];
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        readtimeout = c.read_timeout
+        read_idle_timeout = c.read_timeout
     )
 
     b = XML.parse(String(r.body), LazyNode)
     committedblocks = String[]
-    for child in children(b)
-        if tag(child) == "BlockList"
-            for grandchild in children(child)
-                if tag(grandchild) == "CommittedBlocks"
-                    for greatgrandchild in children(grandchild)
-                        for greatgreatgrandchild in children(greatgrandchild)
-                            if tag(greatgreatgrandchild) == "Name"
-                                push!(committedblocks, value(first(children(greatgreatgrandchild))))
-                                break
-                            end
-                        end
-                    end
+    for blocklist in elements(b)
+        tag(blocklist) == "BlockList" || continue
+        for committed in elements(blocklist)
+            tag(committed) == "CommittedBlocks" || continue
+            for block in elements(committed)
+                tag(block) == "Block" || continue
+                for nm in elements(block)
+                    tag(nm) == "Name" && (push!(committedblocks, _elementtext(nm)); break)
                 end
-                break
             end
-            break
         end
     end
     committedblocks
@@ -412,7 +403,7 @@ function putblocklist(c, o, blockids)
     for blockid in blockids
         push!(xroot, XML.Element("Uncommitted", blockid))
     end
-    xdoc = XML.Document(XML.Declaration(version=1.0, encoding="UTF-8"), xroot)
+    xdoc = XML.Document(XML.Declaration(version="1.0", encoding="UTF-8"), xroot)
     blocklist = XML.write(xdoc; indentsize=0)
 
     try
@@ -425,13 +416,13 @@ function putblocklist(c, o, blockids)
                 "Content-Type" => "application/octet-stream",
                 "Content-Length" => "$(length(blocklist))"
             ],
-            blocklist,
+            blocklist;
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            readtimeout = c.read_timeout)
+            read_idle_timeout = c.read_timeout)
     catch e
-        isa(e, HTTP.Exceptions.StatusError) || throw(e)
+        isa(e, HTTP.StatusError) || throw(e)
 
         #=
         Special handling for 400 errors with "InvalidBlockList" error code.
@@ -570,7 +561,7 @@ function Base.touch(c::AzContainer, o::AbstractString)
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            readtimeout = c.read_timeout)
+            read_idle_timeout = c.read_timeout)
     end
 end
 
@@ -653,9 +644,8 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
                     "Range" => "bytes=$offset-$(offset+length(data)-1)"
                 ];
                 retry = false,
-                verbose = c.verbose,
                 connect_timeout = c.connect_timeout,
-                readtimeout = c.read_timeout) do io
+                read_idle_timeout = c.read_timeout) do io
             read!(io, data)
         end
         nothing
@@ -909,16 +899,15 @@ function get_user_delegation_key(c::AzContainer; start=now(UTC), expiry=now(UTC)
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        readtimeout = c.read_timeout)
+        read_idle_timeout = c.read_timeout)
 
     b = XML.parse(String(r.body), LazyNode)
     delegation_key = Dict{String,String}()
-    for child in children(b)
-        if tag(child) == "UserDelegationKey"
-            for grandchild in children(child)
-                if tag(grandchild) in ("SignedOid", "SignedTid", "SignedStart", "SignedExpiry", "SignedService", "SignedVersion", "Value")
-                    delegation_key[string(tag(grandchild))] = value(first(children(grandchild)))
-                end
+    for udk in elements(b)
+        tag(udk) == "UserDelegationKey" || continue
+        for field in elements(udk)
+            if tag(field) in ("SignedOid", "SignedTid", "SignedStart", "SignedExpiry", "SignedService", "SignedVersion", "Value")
+                delegation_key[string(tag(field))] = _elementtext(field)
             end
         end
     end
@@ -1021,7 +1010,7 @@ function status(c::AzContainer, b::AbstractString)
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        readtimeout = c.read_timeout
+        read_idle_timeout = c.read_timeout
     )
 
     copy_status = HTTP.header(r_status, "x-ms-copy-status")
@@ -1052,7 +1041,7 @@ function Base.cp(inc::AzContainer, inb::AbstractString, outc::AzContainer, outb:
         retry = false,
         verbose = inc.verbose,
         connect_timeout = inc.connect_timeout,
-        readtimeout = inc.read_timeout
+        read_idle_timeout = inc.read_timeout
     )
 
     if !async && r_copy.status == 202
@@ -1131,19 +1120,23 @@ function Base.readdir(c::AzContainer; filterlist=true)
             [
                 "Authorization" => "Bearer $(token(c.session))",
                 "x-ms-version" => API_VERSION
-            ],
+            ];
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            readtimeout = c.read_timeout)
+            read_idle_timeout = c.read_timeout)
 
         xdoc = XML.parse(LazyNode, String(r.body))
-        for node in children(xdoc)
+        for node in elements(xdoc)
             if tag(node) == "EnumerationResults"
-                for _node in children(node)
+                for _node in elements(node)
                     if tag(_node) == "Blobs"
-                         for __node in children(_node)
-                            name = value(first(children(first(children(__node)))))
+                        for blob in elements(_node)
+                            tag(blob) == "Blob" || continue
+                            name = ""
+                            for nm in elements(blob)
+                                tag(nm) == "Name" && (name = _elementtext(nm); break)
+                            end
                             if filterlist
                                 push!(names, replace(name, _normpath(c.prefix*"/")=>""))
                             else
@@ -1151,7 +1144,7 @@ function Base.readdir(c::AzContainer; filterlist=true)
                             end
                         end
                     elseif tag(_node) == "NextMarker"
-                       marker = isempty(children(_node)) ? "" : value(first(children(_node)))
+                        marker = _elementtext(_node)
                     end
                 end
                 break
@@ -1208,15 +1201,15 @@ function Base.isfile(c::AzContainer, object::AbstractString)
             [
                 "Authorization" => "Bearer $(token(c.session))",
                 "x-ms-version" => API_VERSION
-            ],
+            ];
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            readtimeout = c.read_timeout)
+            read_idle_timeout = c.read_timeout)
     catch e
         if isa(e, FileDoesNotExistError)
             return false
-        elseif isa(e, HTTP.Exceptions.StatusError) && e.status == 404
+        elseif isa(e, HTTP.StatusError) && e.status == 404
             return false
         elseif isnoname_error(e)
             return false
@@ -1271,28 +1264,28 @@ function containers(;storageaccount, session=AzSession(;lazy=false, scope=__OAUT
             [
                 "Authorization" => "Bearer $(token(session))",
                 "x-ms-version" => API_VERSION
-            ],
+            ];
             retry = false,
             verbose = verbose,
             connect_timeout = connect_timeout,
-            readtimeout = read_timeout)
+            read_idle_timeout = read_timeout)
 
         xdoc = XML.parse(LazyNode, String(r.body))
-        for node in children(xdoc)
+        for node in elements(xdoc)
             if tag(node) == "EnumerationResults"
-                for _node in children(node)
+                for _node in elements(node)
                     if tag(_node) == "Containers"
-                        for __node in children(_node)
-                            for ___node in children(__node)
-                                if tag(___node) == "Name"
-                                    name = value(first(children(___node)))
-                                    push!(containernames, name)
+                        for container in elements(_node)
+                            tag(container) == "Container" || continue
+                            for nm in elements(container)
+                                if tag(nm) == "Name"
+                                    push!(containernames, _elementtext(nm))
                                     break
                                 end
                             end
                         end
                     elseif tag(_node) == "NextMarker"
-                        marker = isempty(children(_node)) ? "" : value(first(children(_node)))
+                        marker = _elementtext(_node)
                     end
                 end
             end
@@ -1314,18 +1307,12 @@ function Base.filesize(c::AzContainer, o::AbstractString)
         [
             "Authorization" => "Bearer $(token(c.session))",
             "x-ms-version" => API_VERSION
-        ],
+        ];
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        readtimeout = c.read_timeout)
-    n = 0
-    for header in r.headers
-        if header.first == "Content-Length"
-            n = parse(Int, header.second)
-        end
-    end
-    n
+        read_idle_timeout = c.read_timeout)
+    parse(Int, HTTP.header(r, "Content-Length", "0"))
 end
 
 """
@@ -1352,11 +1339,11 @@ function metadata(c::AzContainer, o::AbstractString)
         [
             "Authorization" => "Bearer $(token(c.session))",
             "x-ms-version" => API_VERSION
-        ],
+        ];
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        readtimeout = c.read_timeout)
+        read_idle_timeout = c.read_timeout)
 
     Dict(
         "size" => parse(Int, HTTP.header(r, "Content-Length", "0")),
@@ -1394,11 +1381,11 @@ function Base.rm(c::AzContainer, o::AbstractString; quiet=true)
             [
                 "Authorization" => "Bearer $(token(c.session))",
                 "x-ms-version" => API_VERSION
-            ],
+            ];
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            readtimeout = c.read_timeout)
+            read_idle_timeout = c.read_timeout)
     catch
         quiet || rethrow()
         @warn "error removing $(c.containername)/$(addprefix(c,o))"
@@ -1435,11 +1422,11 @@ function Base.rm(c::AzContainer; quiet=true)
             [
                 "Authorization" => "Bearer $(token(c.session))",
                 "x-ms-version" => API_VERSION
-            ],
+            ];
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            readtimeout = c.read_timeout)
+            read_idle_timeout = c.read_timeout)
     end
 
     try
@@ -1538,7 +1525,7 @@ function tier!(c::AzContainer, o::AbstractString; tier="Hot", rehydrate_priority
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        readtimeout = c.read_timeout)
+        read_idle_timeout = c.read_timeout)
 
     # touching resets the lifecycle-rule clock so a rule doesn't immediately re-tier the blob back.
     # we can't touch an archived blob, so skip it both when archiving (tier=="Archive") and when a
@@ -1581,7 +1568,7 @@ tier!(c::AzContainer; tier="Hot", rehydrate_priority=nothing, ntasks=100) = asyn
 """
     tier(c, o)
 
-Returns the access tier for a blob `o::AbstractArray` in container `c::AzContainer`.
+Returns the access tier for a blob `o::AbstractString` in container `c::AzContainer`.
 """
 function tier(c::AzContainer, o::AbstractString)
     r = HTTP.request(
@@ -1594,7 +1581,7 @@ function tier(c::AzContainer, o::AbstractString)
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        readtimeout = c.read_timeout)
+        read_idle_timeout = c.read_timeout)
 
     HTTP.header(r.headers, "x-ms-access-tier")
 end
