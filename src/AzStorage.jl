@@ -330,6 +330,23 @@ function nblocks(nthreads::Integer, nbytes::Integer, max_bytes_per_block=_MAXBYT
     nblocks
 end
 
+# A standard top-tier-US Azure storage account absorbs ~450 GB of writes per minute (60 Gbps);
+# premium block-blob accounts share the same bandwidth cap.  Scale by ~0.4 for non-top-tier (~25 Gbps).
+const _ACCOUNT_WRITE_BYTES_PER_MINUTE = 450_000_000_000
+
+"""
+    max_concurrent_io_workers(nbytes, n_accounts)
+
+Return a safe cap on the number of workers that may write concurrently to `n_accounts` Azure storage
+accounts, given that each worker transfers `nbytes` bytes, so that their aggregate throughput stays
+within the accounts' write-bandwidth ceiling.
+
+Useful for sizing concurrency limits in higher-level packages — e.g. the `maxreduceworkers` option of
+`Schedulers.SchedulerOptions`, passing the reduce-buffer size as `nbytes`.
+"""
+max_concurrent_io_workers(nbytes, n_accounts) =
+    max(1, div(_ACCOUNT_WRITE_BYTES_PER_MINUTE * n_accounts, nbytes))
+
 _normpath(s) = Sys.iswindows() ? replace(normpath(s), "\\"=>"/") : normpath(s)
 
 addprefix(c::AzContainer, o) = c.prefix == "" ? o : _normpath("$(c.prefix)/$o")
@@ -1593,6 +1610,6 @@ Returns the access tier for a blob `o::AzObject`.
 """
 tier(o::AzObject) = tier(o.container, o.name)
 
-export AzContainer, containers, metadata, readdlm, status, tier, tier!, writedlm
+export AzContainer, containers, max_concurrent_io_workers, metadata, readdlm, status, tier, tier!, writedlm
 
 end

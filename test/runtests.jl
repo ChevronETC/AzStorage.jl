@@ -69,6 +69,18 @@ sleep(60)
     @test y == [6,7,28,35,42,55,56]
 end
 
+@testset "max_concurrent_io_workers" begin
+    # one account's ~450 GB/minute write budget divided by the per-worker transfer size
+    @test max_concurrent_io_workers(45_000_000_000, 1) == 10
+    @test max_concurrent_io_workers(45_000_000_000, 10) == 100
+    # scales linearly with the number of accounts
+    @test max_concurrent_io_workers(45_000_000_000, 4) == 4 * max_concurrent_io_workers(45_000_000_000, 1)
+    # never fewer than one worker, even when a single transfer exceeds the per-minute budget
+    @test max_concurrent_io_workers(10_000_000_000_000, 1) == 1
+    # 54.22 GiB reduce buffer across 10 accounts
+    @test max_concurrent_io_workers(58_215_021_536, 10) == 77
+end
+
 @testset "Retry macro, 429 with Retry-After header" begin
     # Simulate a 429 response with a Retry-After header
     call_count = 0
