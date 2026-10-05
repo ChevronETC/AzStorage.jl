@@ -18,12 +18,13 @@ exponential_backoff(
         int i,
         int retry_after)
 {
+    // we make the jitter big to avoid retrying from multiple clients at the same time
     double sleeptime_seconds,sleeptime_nanoseconds;
     if (retry_after > 0) {
-        sleeptime_seconds = retry_after + 1.0*rand()/RAND_MAX;
+        sleeptime_seconds = retry_after * (1.0 + 0.5*rand()/RAND_MAX);
         sleeptime_nanoseconds = 0.0;
     } else {
-        double sleeptime = MIN(pow(2.0, (double)i), MAXIMUM_BACKOFF) + 1.0*rand()/RAND_MAX;
+        double sleeptime = MIN(pow(2.0, (double)i), MAXIMUM_BACKOFF) * (1.0 + 0.5*rand()/RAND_MAX);
         sleeptime_seconds = floor(sleeptime);
         sleeptime_nanoseconds = (long)((sleeptime - sleeptime_seconds) * 1000000000.0);
     }

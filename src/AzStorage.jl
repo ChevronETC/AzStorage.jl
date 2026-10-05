@@ -216,12 +216,12 @@ macro retry(retries, ex::Expr)
             catch e
                 (i < $(esc(retries)) && isretryable(e)) || throw(azstorage_exception(e))
                 maximum_backoff = 256
-                s = min(2.0^(i-1), maximum_backoff) + rand()
+                s = min(2.0^(i-1), maximum_backoff) * (1.0 + 0.5*rand())
                 found_retry_after = false
                 if status(e) ∈ (429, 503)
                     j = findfirst(header->lowercase(header[1]) == "retry-after", e.response.headers)
                     if j !== nothing
-                        s = parse(Int, e.response.headers[j][2]) + rand()
+                        s = parse(Int, e.response.headers[j][2]) * (1.0 + 0.5*rand())
                         found_retry_after = true
                     end
                 end
