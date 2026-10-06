@@ -482,6 +482,14 @@ curl_refresh_tokens_from_client_credentials(
     curl_free(_client_secret);
     curl_free(_resource);
 
+    if (datastruct.data != NULL) {
+        free(datastruct.data);
+        datastruct.data = NULL;
+    }
+
+    curl_easy_cleanup(curlhandle);
+    curl_slist_free_all(headers);
+
     struct ResponseCodes responsecodes;
 
     responsecodes.curl = responsecode_curl;
