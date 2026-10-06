@@ -42,7 +42,8 @@ mutable struct AzContainer{A<:AzSessionAbstract} <: Container
     session::A
     nthreads::Int
     connect_timeout::Int
-    read_timeout::Int
+    read_idle_timeout::Int
+    write_idle_timeout::Int
     nretry::Int
     verbose::Int
 end
@@ -54,8 +55,9 @@ function Base.copy(container::AzContainer)
         container.prefix,
         copy(container.session),
         container.nthreads,
-        connect_timeout,
-        read_timeout,
+        container.connect_timeout,
+        container.read_idle_timeout,
+        container.write_idle_timeout,
         container.nretry,
         container.verbose)
 end
@@ -139,8 +141,9 @@ The storage account must already exist.
 # Additional keyword arguments
 * `session=AzSession(;lazy=false,scope=$__OAUTH_SCOPE)` user credentials (see AzSessions.jl package).
 * `nthreads=Sys.CPU_THREADS` number of system threads that OpenMP will use to thread I/O.
-* `connect_timeout=30` client-side timeout for connecting to the server.
-* `read_timeout=10` client-side timeout for receiving the first byte from the server.
+* `connect_timeout=10` client-side timeout for connecting to the server.
+* `read_idle_timeout=30` client-side timeout for receiving the first byte from the server. For backwards compatability it is equivalent to set `read_timeout`.
+* `write_idle_timeout=30` client-side timeout for sending the first byte to the server.
 * `nretry=10` number of retries to the Azure service (when Azure throws a retryable error) before throwing an error.
 * `verbose=0` verbosity flag passed to libcurl.
 
@@ -149,15 +152,17 @@ The container name can contain "/"'s.  If this is the case, then the string prec
 be the container name, and the string that remains will be pre-pended to the blob names.  This allows Azure
 to present blobs in a pseudo-directory structure.  Note that trailing and leading `/`'s are ignored.
 """
-function AzContainer(containername::AbstractString; storageaccount, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nthreads=Sys.CPU_THREADS, connect_timeout=10, read_timeout=30, nretry=10, verbose=0, prefix="")
+function AzContainer(containername::AbstractString; storageaccount, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nthreads=Sys.CPU_THREADS, connect_timeout=10, read_timeout=nothing, read_idle_timeout=30, write_idle_timeout=30, nretry=10, verbose=0, prefix="")
     name = split(strip(containername, '/'), '/')
     _containername = name[1]
     prefix = strip(strip(prefix, '/')*'/'*join(name[2:end], '/'), '/')
 
-    AzContainer(String(storageaccount), String(_containername), String(prefix), session, windows_one_thread(nthreads), connect_timeout, read_timeout, nretry, verbose)
+    read_idle_timeout = read_timeout === nothing ? read_idle_timeout : read_timeout
+    AzContainer(String(storageaccount), String(_containername), String(prefix), session, windows_one_thread(nthreads), connect_timeout, read_idle_timeout, write_idle_timeout, nretry, verbose)
 end
 
-function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE); nthreads=Sys.CPU_THREADS, connect_timeout=10, read_timeout=30, nretry=10, verbose=0)
+function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE); nthreads=Sys.CPU_THREADS, connect_timeout=10, read_timeout=nothing, read_idle_timeout=30, write_idle_timeout=30, nretry=10, verbose=0)
+    read_idle_timeout = read_timeout === nothing ? read_idle_timeout : read_timeout
     AzContainer(
         d["storageaccount"],
         String(strip(d["containername"], '/')),
@@ -165,7 +170,8 @@ function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSes
         session,
         windows_one_thread(get(d, "nthreads", nthreads)),
         connect_timeout,
-        read_timeout,
+        read_idle_timeout,
+        write_idle_timeout,
         get(d, "nretry", nretry),
         get(d, "verbose", verbose))
 end
@@ -310,7 +316,8 @@ function Base.mkpath(c::AzContainer)
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            read_idle_timeout = c.read_timeout)
+            read_idle_timeout = c.read_idle_timeout,
+            write_idle_timeout = c.write_idle_timeout)
     end
     nothing
 end
@@ -366,7 +373,8 @@ function writebytes_blob(c, o, data, contenttype)
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        read_idle_timeout = c.read_timeout)
+        read_idle_timeout = c.read_idle_timeout,
+        write_idle_timeout = c.write_idle_timeout)
     nothing
 end
 
@@ -395,7 +403,8 @@ function committed_blocklist(c, o)
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        read_idle_timeout = c.read_timeout
+        read_idle_timeout = c.read_idle_timeout,
+        write_idle_timeout = c.write_idle_timeout
     )
 
     b = XML.parse(String(r.body), LazyNode)
@@ -437,7 +446,8 @@ function putblocklist(c, o, blockids)
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            read_idle_timeout = c.read_timeout)
+            read_idle_timeout = c.read_idle_timeout,
+            write_idle_timeout = c.write_idle_timeout)
     catch e
         isa(e, HTTP.StatusError) || throw(e)
 
@@ -465,7 +475,7 @@ function writebytes_block(c, o, data, _blockids)
     _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
     r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
         clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, __blockids::Ptr{Cstring}, data::Ptr{UInt8},
-        length(data)::Csize_t, c.nthreads::Cint, length(__blockids)::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::ResponseCodes
+        length(data)::Csize_t, c.nthreads::Cint, length(__blockids)::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, max(c.read_idle_timeout, c.write_idle_timeout)::Clong)::ResponseCodes
     (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
     authinfo!(c.session, _token, refresh_token, expiry)
 end
@@ -578,7 +588,8 @@ function Base.touch(c::AzContainer, o::AbstractString)
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            read_idle_timeout = c.read_timeout)
+            read_idle_timeout = c.read_idle_timeout,
+            write_idle_timeout = c.write_idle_timeout)
     end
 end
 
@@ -662,7 +673,8 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
                 ];
                 retry = false,
                 connect_timeout = c.connect_timeout,
-                read_idle_timeout = c.read_timeout) do io
+                read_idle_timeout = c.read_idle_timeout,
+                write_idle_timeout = c.write_idle_timeout) do io
             read!(io, data)
         end
         nothing
@@ -674,7 +686,7 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
         _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
         r = @ccall libAzStorage.curl_readbytes_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
             clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, data::Ptr{UInt8}, offset::Csize_t,
-            length(data)::Csize_t, _nthreads::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::ResponseCodes
+            length(data)::Csize_t, _nthreads::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, max(c.read_idle_timeout, c.write_idle_timeout)::Clong)::ResponseCodes
         r.http == 404 && throw(FileDoesNotExistError())
         (r.http >= 300 || r.curl > 0) && error("readbytes_threaded! error: http code $(r.http), curl code $(r.curl)")
         authinfo!(c.session, _token, refresh_token, expiry)
@@ -916,7 +928,8 @@ function get_user_delegation_key(c::AzContainer; start=now(UTC), expiry=now(UTC)
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        read_idle_timeout = c.read_timeout)
+        read_idle_timeout = c.read_idle_timeout,
+        write_idle_timeout = c.write_idle_timeout)
 
     b = XML.parse(String(r.body), LazyNode)
     delegation_key = Dict{String,String}()
@@ -1027,7 +1040,8 @@ function status(c::AzContainer, b::AbstractString)
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        read_idle_timeout = c.read_timeout
+        read_idle_timeout = c.read_idle_timeout,
+        write_idle_timeout = c.write_idle_timeout
     )
 
     copy_status = HTTP.header(r_status, "x-ms-copy-status")
@@ -1058,7 +1072,8 @@ function Base.cp(inc::AzContainer, inb::AbstractString, outc::AzContainer, outb:
         retry = false,
         verbose = inc.verbose,
         connect_timeout = inc.connect_timeout,
-        read_idle_timeout = inc.read_timeout
+        read_idle_timeout = inc.read_idle_timeout,
+        write_idle_timeout = inc.write_idle_timeout
     )
 
     if !async && r_copy.status == 202
@@ -1141,7 +1156,8 @@ function Base.readdir(c::AzContainer; filterlist=true)
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            read_idle_timeout = c.read_timeout)
+            read_idle_timeout = c.read_idle_timeout,
+            write_idle_timeout = c.write_idle_timeout)
 
         xdoc = XML.parse(LazyNode, String(r.body))
         for node in elements(xdoc)
@@ -1222,7 +1238,8 @@ function Base.isfile(c::AzContainer, object::AbstractString)
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            read_idle_timeout = c.read_timeout)
+            read_idle_timeout = c.read_idle_timeout,
+            write_idle_timeout = c.write_idle_timeout)
     catch e
         if isa(e, FileDoesNotExistError)
             return false
@@ -1267,11 +1284,12 @@ function Base.isdir(c::AzContainer)
 end
 
 """
-    containers(;storageaccount="mystorageaccount", session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nretry=5, verbose=0, connect_timeout=30, read_timeout=10)
+    containers(;storageaccount="mystorageaccount", session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nretry=5, verbose=0, connect_timeout=10, read_idle_timeout=30, write_idle_timeout=30)
 
 list all containers in a given storage account.
 """
-function containers(;storageaccount, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nretry=5, verbose=0, connect_timeout=30, read_timeout=10)
+function containers(;storageaccount, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE), nretry=5, verbose=0, connect_timeout=10, read_timeout=nothing, read_idle_timeout=30, write_idle_timeout=30)
+    read_idle_timeout = read_timeout === nothing ? read_idle_timeout : read_timeout
     marker = ""
     containernames = String[]
     while true
@@ -1285,7 +1303,8 @@ function containers(;storageaccount, session=AzSession(;lazy=false, scope=__OAUT
             retry = false,
             verbose = verbose,
             connect_timeout = connect_timeout,
-            read_idle_timeout = read_timeout)
+            read_idle_timeout = read_idle_timeout,
+            write_idle_timeout = write_idle_timeout)
 
         xdoc = XML.parse(LazyNode, String(r.body))
         for node in elements(xdoc)
@@ -1328,7 +1347,8 @@ function Base.filesize(c::AzContainer, o::AbstractString)
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        read_idle_timeout = c.read_timeout)
+        read_idle_timeout = c.read_idle_timeout,
+        write_idle_timeout = c.write_idle_timeout)
     parse(Int, HTTP.header(r, "Content-Length", "0"))
 end
 
@@ -1360,7 +1380,8 @@ function metadata(c::AzContainer, o::AbstractString)
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        read_idle_timeout = c.read_timeout)
+        read_idle_timeout = c.read_idle_timeout,
+        write_idle_timeout = c.write_idle_timeout)
 
     Dict(
         "size" => parse(Int, HTTP.header(r, "Content-Length", "0")),
@@ -1402,7 +1423,8 @@ function Base.rm(c::AzContainer, o::AbstractString; quiet=true)
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            read_idle_timeout = c.read_timeout)
+            read_idle_timeout = c.read_idle_timeout,
+            write_idle_timeout = c.write_idle_timeout)
     catch
         quiet || rethrow()
         @warn "error removing $(c.containername)/$(addprefix(c,o))"
@@ -1443,7 +1465,8 @@ function Base.rm(c::AzContainer; quiet=true)
             retry = false,
             verbose = c.verbose,
             connect_timeout = c.connect_timeout,
-            read_idle_timeout = c.read_timeout)
+            read_idle_timeout = c.read_idle_timeout,
+            write_idle_timeout = c.write_idle_timeout)
     end
 
     try
@@ -1542,7 +1565,8 @@ function tier!(c::AzContainer, o::AbstractString; tier="Hot", rehydrate_priority
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        read_idle_timeout = c.read_timeout)
+        read_idle_timeout = c.read_idle_timeout,
+        write_idle_timeout = c.write_idle_timeout)
 
     # touching resets the lifecycle-rule clock so a rule doesn't immediately re-tier the blob back.
     # we can't touch an archived blob, so skip it both when archiving (tier=="Archive") and when a
@@ -1598,7 +1622,8 @@ function tier(c::AzContainer, o::AbstractString)
         retry = false,
         verbose = c.verbose,
         connect_timeout = c.connect_timeout,
-        read_idle_timeout = c.read_timeout)
+        read_idle_timeout = c.read_idle_timeout,
+        write_idle_timeout = c.write_idle_timeout)
 
     HTTP.header(r.headers, "x-ms-access-tier")
 end
