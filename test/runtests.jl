@@ -781,9 +781,12 @@ end
 
 @testset "timeouts" begin
     r = uuid4()
-    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nretry=0, connect_timeout=2, read_timeout=3)
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nretry=0, connect_timeout=2, write_idle_timeout=4, read_timeout=3) # read_timeout is for backwdards compat (vs using read_idle_timeout).
     @test c.connect_timeout == 2
-    @test c.read_timeout == 3
+    @test c.read_idle_timeout == 3
+    @test c.write_idle_timeout == 4
+    c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nretry=0, connect_timeout=2, read_idle_timeout=4)
+    @test c.read_idle_timeout == 4
 end
 
 if !Sys.iswindows()
@@ -874,7 +877,7 @@ end
 if !Sys.iswindows() && !Sys.isapple()
     @testset "C token refresh, write" begin
         r = uuid4()
-        c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=4, connect_timeout=2, read_timeout=3)
+        c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=4, connect_timeout=2, read_idle_timeout=3)
         c = robust_mkpath(c)
         o = "foo.bin"
 
@@ -896,7 +899,7 @@ if !Sys.iswindows() && !Sys.isapple()
 
         r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
             clientid::Cstring, client_secret::Cstring,c.storageaccount::Cstring, c.containername::Cstring, AzStorage.addprefix(c,o)::Cstring, _blockids::Ptr{Cstring}, data::Ptr{UInt8},
-            length(data)::Csize_t, c.nthreads::Cint, _nblocks::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::AzStorage.ResponseCodes
+            length(data)::Csize_t, c.nthreads::Cint, _nblocks::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_idle_timeout::Clong)::AzStorage.ResponseCodes
 
         AzStorage.authinfo!(c.session, _token, refresh_token, expiry)
         @test t != c.session.token
@@ -909,7 +912,7 @@ if !Sys.iswindows() && !Sys.isapple()
 
     @testset "C token refresh, read" begin
         r = uuid4()
-        c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=4, connect_timeout=2, read_timeout=3)
+        c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=4, connect_timeout=2, read_idle_timeout=3)
         c = robust_mkpath(c)
         o = "foo.bin"
 
@@ -933,7 +936,7 @@ if !Sys.iswindows() && !Sys.isapple()
 
         r = @ccall libAzStorage.curl_readbytes_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
             clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, AzStorage.addprefix(c,o)::Cstring, _data::Ptr{UInt8}, offset::Csize_t,
-            length(data)::Csize_t, _nthreads::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_timeout::Clong)::AzStorage.ResponseCodes
+            length(data)::Csize_t, _nthreads::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, c.read_idle_timeout::Clong)::AzStorage.ResponseCodes
 
         AzStorage.authinfo!(c.session, _token, refresh_token, expiry)
 
