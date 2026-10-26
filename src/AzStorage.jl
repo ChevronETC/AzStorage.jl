@@ -424,6 +424,14 @@ function committed_blocklist(c, o)
     committedblocks
 end
 
+"""
+    putblocklist(container, "blobname", blockids)
+    putblocklist(object::AzObject, blockids)
+
+Commit the uncommitted blocks `blockids` (uploaded with `putblock`), in that order, as the content
+of the block blob "blobname". The blob is created or replaced in a single step, so readers never
+see a partially written blob.
+"""
 function putblocklist(c, o, blockids)
     xroot = XML.Element("BlockList")
     for blockid in blockids
@@ -464,21 +472,54 @@ function putblocklist(c, o, blockids)
     nothing
 end
 
+"""
+    blockids(n)
+
+Return `n` block ids of equal length (all block ids of a blob must have the same length), for use
+with `putblock` and `putblocklist`.
+"""
 function blockids(_nblocks)
     l = ceil(Int, log10(_nblocks))
     [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
 end
 
-function writebytes_block(c, o, data, _blockids)
+function writebytes_block(c, o, data, _blockids; nthreads=c.nthreads)
     __blockids = [HTTP.escapeuri(_blockid) for _blockid in _blockids]
     token(c.session)
     _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
     r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
         clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, __blockids::Ptr{Cstring}, data::Ptr{UInt8},
-        length(data)::Csize_t, c.nthreads::Cint, length(__blockids)::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, max(c.read_idle_timeout, c.write_idle_timeout)::Clong)::ResponseCodes
+        length(data)::Csize_t, nthreads::Cint, length(__blockids)::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, max(c.read_idle_timeout, c.write_idle_timeout)::Clong)::ResponseCodes
     (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
     authinfo!(c.session, _token, refresh_token, expiry)
 end
+
+"""
+    putblock(container, "blobname", blockid, data)
+    putblock(object::AzObject, blockid, data)
+
+Upload `data`, a contiguous array of isbits elements, as the uncommitted block `blockid` of the
+block blob "blobname". The blob does not change until its block list is committed with
+`putblocklist`, so blocks can be uploaded in any order and concurrently, for example from several
+threads. All block ids of a blob must have the same length; `blockids(n)` returns `n` such ids.
+A block holds at most 4000 MiB, and a blob at most 50,000 blocks.
+
+# Example
+```julia
+io = open(AzContainer("mycontainer"; storageaccount="mystorageaccount"), "foo.bin")
+ids = AzStorage.blockids(2)
+AzStorage.putblock(io, ids[2], rand(UInt8, 10))
+AzStorage.putblock(io, ids[1], rand(UInt8, 20))
+AzStorage.putblocklist(io, ids)
+```
+"""
+function putblock(c::AzContainer, o::AbstractString, blockid::AbstractString, data::AbstractArray{T}) where {T}
+    _iscontiguous(data) || error("AzStorage: `putblock` is not supported on non-isbits arrays and/or non-contiguous arrays")
+    GC.@preserve data writebytes_block(c, o, unsafe_wrap(Vector{UInt8}, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false), [blockid]; nthreads=1)
+    nothing
+end
+putblock(o::AzObject, blockid, data) = putblock(o.container, o.name, blockid, data)
+putblocklist(o::AzObject, blockids) = putblocklist(o.container, o.name, blockids)
 
 function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; contenttype="application/octet-stream")
     if Sys.iswindows()
