@@ -483,13 +483,13 @@ function blockids(_nblocks)
     [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
 end
 
-function writebytes_block(c, o, data, _blockids; nthreads=c.nthreads)
+function writebytes_block(c, o, data, _blockids)
     __blockids = [HTTP.escapeuri(_blockid) for _blockid in _blockids]
     token(c.session)
     _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
     r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
         clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, __blockids::Ptr{Cstring}, data::Ptr{UInt8},
-        length(data)::Csize_t, nthreads::Cint, length(__blockids)::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, max(c.read_idle_timeout, c.write_idle_timeout)::Clong)::ResponseCodes
+        length(data)::Csize_t, c.nthreads::Cint, length(__blockids)::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, max(c.read_idle_timeout, c.write_idle_timeout)::Clong)::ResponseCodes
     (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
     authinfo!(c.session, _token, refresh_token, expiry)
 end
@@ -507,15 +507,40 @@ A block holds at most 4000 MiB, and a blob at most 50,000 blocks.
 # Example
 ```julia
 io = open(AzContainer("mycontainer"; storageaccount="mystorageaccount"), "foo.bin")
-ids = AzStorage.blockids(2)
-AzStorage.putblock(io, ids[2], rand(UInt8, 10))
-AzStorage.putblock(io, ids[1], rand(UInt8, 20))
-AzStorage.putblocklist(io, ids)
+ids = blockids(2)
+putblock(io, ids[2], rand(UInt8, 10))
+putblock(io, ids[1], rand(UInt8, 20))
+putblocklist(io, ids)
 ```
 """
 function putblock(c::AzContainer, o::AbstractString, blockid::AbstractString, data::AbstractArray{T}) where {T}
     _iscontiguous(data) || error("AzStorage: `putblock` is not supported on non-isbits arrays and/or non-contiguous arrays")
-    GC.@preserve data writebytes_block(c, o, unsafe_wrap(Vector{UInt8}, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false), [blockid]; nthreads=1)
+    nbytes = length(data)*sizeof(T)
+    if Sys.iswindows()
+        GC.@preserve data @retry c.nretry HTTP.request(
+            "PUT",
+            "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))?comp=block&blockid=$(HTTP.escapeuri(blockid))",
+            [
+                "Authorization" => "Bearer $(token(c.session))",
+                "x-ms-version" => API_VERSION,
+                "Content-Length" => "$nbytes"
+            ],
+            unsafe_wrap(Vector{UInt8}, convert(Ptr{UInt8}, pointer(data)), nbytes; own=false);
+            retry = false,
+            verbose = c.verbose,
+            connect_timeout = c.connect_timeout,
+            read_idle_timeout = c.read_idle_timeout,
+            write_idle_timeout = c.write_idle_timeout)
+    else
+        token(c.session)
+        _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
+        # one block (nblocks=1), uploaded by one thread (nthreads=1)
+        r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
+            clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, [HTTP.escapeuri(blockid)]::Ptr{Cstring}, data::Ptr{UInt8},
+            nbytes::Csize_t, 1::Cint, 1::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, max(c.read_idle_timeout, c.write_idle_timeout)::Clong)::ResponseCodes
+        (r.http >= 300 || r.curl > 0) && error("putblock error: http code $(r.http), curl code $(r.curl)")
+        authinfo!(c.session, _token, refresh_token, expiry)
+    end
     nothing
 end
 putblock(o::AzObject, blockid, data) = putblock(o.container, o.name, blockid, data)
@@ -1676,6 +1701,6 @@ Returns the access tier for a blob `o::AzObject`.
 """
 tier(o::AzObject) = tier(o.container, o.name)
 
-export AzContainer, containers, max_concurrent_io_workers, metadata, readdlm, status, tier, tier!, writedlm
+export AzContainer, blockids, containers, max_concurrent_io_workers, metadata, putblock, putblocklist, readdlm, status, tier, tier!, writedlm
 
 end

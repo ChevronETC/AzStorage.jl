@@ -463,15 +463,17 @@ end
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     io = robust_open(c, "bar")
     x = rand(Float32, 100)
-    ids = AzStorage.blockids(3)
+    ids = blockids(3)
     # blocks from views, uploaded out of order and concurrently
     @sync for (i, range) in ((3, 81:100), (1, 1:40), (2, 41:80))
-        Threads.@spawn AzStorage.putblock(io, ids[i], view(x, range))
+        Threads.@spawn putblock(io, ids[i], view(x, range))
     end
     @test !isfile(io)
-    AzStorage.putblocklist(io, ids)
+    putblocklist(io, ids)
     @test read!(io, zeros(Float32, 100)) == x
     @test read!(io, zeros(Float32, 40); offset=40) == x[41:80]
+    @test_throws ErrorException putblock(io, ids[1], view(x, 1:2:100))
+    @test_throws ErrorException putblock(io, ids[1], 1:10)
     rm(c)
 end
 

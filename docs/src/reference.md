@@ -38,7 +38,7 @@ writedlm
 ## Block methods
 Upload a blob in independent blocks, for example concurrently, and make it visible in a single step.
 ```@docs
-AzStorage.blockids
-AzStorage.putblock
-AzStorage.putblocklist
+blockids
+putblock
+putblocklist
 ```
