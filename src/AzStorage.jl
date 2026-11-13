@@ -832,6 +832,7 @@ function Base.cp(in::AbstractString, outc::AzContainer, outb::AbstractString; bu
         progress.core.desc = @sprintf "read/write = %.2f/%.2f MB/s" speed_read speed_write
         ProgressMeter.next!(progress)
     end
+    close(io)
     wait(tsk_write)
     putblocklist(outc, outb, _blockids)
 end
