@@ -58,15 +58,28 @@ end
 sleep(60)
 
 @testset "Error codes" begin
+    # read the retry codes the way libAzStorage does, as C `long` (32 bits on Windows)
     @test unsafe_load(cglobal((:N_HTTP_RETRY_CODES, AzStorage.libAzStorage), Cint)) == 3
-    x = Sys.iswindows() ? unsafe_load(cglobal((:HTTP_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clonglong})) : unsafe_load(cglobal((:HTTP_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
+    x = unsafe_load(cglobal((:HTTP_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
     y = unsafe_wrap(Array, x, (3,); own=false)
     @test y == [429,500,503]
 
     @test unsafe_load(cglobal((:N_CURL_RETRY_CODES, AzStorage.libAzStorage), Cint)) == 7
-    x = Sys.iswindows() ? unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clonglong})) : unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
+    x = unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
     y = unsafe_wrap(Array, x, (7,); own=false)
     @test y == [6,7,28,35,42,55,56]
+
+    # ask libAzStorage itself which codes it retries: isrestretrycode is its lookup into the arrays above, and decides
+    # whether a request is retried. HTTP 200 and curl code 1 are never retried.
+    isretried(http, curl) = (@ccall libAzStorage.isrestretrycode(AzStorage.ResponseCodes(http, curl, 0)::AzStorage.ResponseCodes)::Cint) == 1
+    @test filter(curl -> isretried(200, curl), 0:127) == AzStorage.RETRYABLE_CURL_ERRORS
+    @test filter(http -> isretried(http, 1), 0:599) == AzStorage.RETRYABLE_HTTP_ERRORS
+
+    # and Julia reads the codes that libAzStorage returns: a token that is valid for another hour is kept, without a request
+    expiry = [floor(Culong, datetime2unix(now(UTC) + Hour(1)))]
+    r = @ccall libAzStorage.curl_refresh_tokens(C_NULL::Ptr{UInt8}, C_NULL::Ptr{UInt8}, expiry::Ptr{Culong}, C_NULL::Ptr{UInt8}, C_NULL::Ptr{UInt8},
+        C_NULL::Ptr{UInt8}, C_NULL::Ptr{UInt8}, C_NULL::Ptr{UInt8}, 0::Cint, 10::Clong, 10::Clong)::AzStorage.ResponseCodes
+    @test r == AzStorage.ResponseCodes(200, 0, 0)
 end
 
 @testset "max_concurrent_io_workers" begin
