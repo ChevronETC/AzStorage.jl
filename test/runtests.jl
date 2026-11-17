@@ -58,15 +58,28 @@ end
 sleep(60)
 
 @testset "Error codes" begin
+    # read the retry codes the way libAzStorage does, as C `long` (32 bits on Windows)
     @test unsafe_load(cglobal((:N_HTTP_RETRY_CODES, AzStorage.libAzStorage), Cint)) == 3
-    x = Sys.iswindows() ? unsafe_load(cglobal((:HTTP_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clonglong})) : unsafe_load(cglobal((:HTTP_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
+    x = unsafe_load(cglobal((:HTTP_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
     y = unsafe_wrap(Array, x, (3,); own=false)
     @test y == [429,500,503]
 
     @test unsafe_load(cglobal((:N_CURL_RETRY_CODES, AzStorage.libAzStorage), Cint)) == 7
-    x = Sys.iswindows() ? unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clonglong})) : unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
+    x = unsafe_load(cglobal((:CURL_RETRY_CODES, AzStorage.libAzStorage), Ptr{Clong}))
     y = unsafe_wrap(Array, x, (7,); own=false)
     @test y == [6,7,28,35,42,55,56]
+
+    # ask libAzStorage itself which codes it retries: isrestretrycode is its lookup into the arrays above, and decides
+    # whether a request is retried. HTTP 200 and curl code 1 are never retried.
+    isretried(http, curl) = (@ccall libAzStorage.isrestretrycode(AzStorage.ResponseCodes(http, curl, 0)::AzStorage.ResponseCodes)::Cint) == 1
+    @test filter(curl -> isretried(200, curl), 0:127) == AzStorage.RETRYABLE_CURL_ERRORS
+    @test filter(http -> isretried(http, 1), 0:599) == AzStorage.RETRYABLE_HTTP_ERRORS
+
+    # and Julia reads the codes that libAzStorage returns: a token that is valid for another hour is kept, without a request
+    expiry = [floor(Culong, datetime2unix(now(UTC) + Hour(1)))]
+    r = @ccall libAzStorage.curl_refresh_tokens(C_NULL::Ptr{UInt8}, C_NULL::Ptr{UInt8}, expiry::Ptr{Culong}, C_NULL::Ptr{UInt8}, C_NULL::Ptr{UInt8},
+        C_NULL::Ptr{UInt8}, C_NULL::Ptr{UInt8}, C_NULL::Ptr{UInt8}, 0::Cint, 10::Clong, 10::Clong)::AzStorage.ResponseCodes
+    @test r == AzStorage.ResponseCodes(200, 0, 0)
 end
 
 @testset "max_concurrent_io_workers" begin
@@ -374,11 +387,7 @@ end
     @test _c.storageaccount == storageaccount
     @test _c.containername == "foo-$r-k"
     @test _c.nretry == 10
-    if Sys.iswindows()
-        @test _c.nthreads == 1
-    else
-        @test _c.nthreads == 2
-    end
+    @test _c.nthreads == 2
     rm(c)
 end
 
@@ -429,6 +438,18 @@ end
 
     @test t3 != t2
 
+    rm(c)
+end
+
+@testset "Containers, write with contenttype" begin
+    r = uuid4()
+    c = AzContainer("foo-$r"; storageaccount, session)
+    mkpath(c)
+    write(c, "test.txt", "Hello")
+    write(c, "test.json", "{}"; contenttype="application/json")
+    content_type(o) = HTTP.header(HTTP.request("HEAD", "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$o", ["Authorization" => "Bearer $(token(c.session))", "x-ms-version" => AzStorage.API_VERSION]), "Content-Type")
+    @test content_type("test.txt") == "text/plain"
+    @test content_type("test.json") == "application/json"
     rm(c)
 end
 
@@ -788,16 +809,6 @@ end
     rm(c)
 end
 
-@testset "Windows, single thread check" begin
-    r = uuid4()
-    container = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
-    if Sys.iswindows()
-        @test container.nthreads == 1
-    else
-        @test container.nthreads == 2
-    end
-end
-
 @testset "timeouts" begin
     r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nretry=0, connect_timeout=2, write_idle_timeout=4, read_timeout=3) # read_timeout is for backwdards compat (vs using read_idle_timeout).
@@ -807,8 +818,6 @@ end
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nretry=0, connect_timeout=2, read_idle_timeout=4)
     @test c.read_idle_timeout == 4
 end
-
-if !Sys.iswindows()
 
 @testset "redundant putblocklist" begin
     #=
@@ -828,8 +837,6 @@ if !Sys.iswindows()
     _x = read!(robust_open(c, "foo.bin"), Vector{UInt8}(undef, 500_000))
     @test _x == x
     rm(c)
-end
-
 end
 
 @testset "backend" begin
@@ -893,7 +900,7 @@ end
 end
 
 # TODO: CI is showing a seg-fault on Apple, but I do not have an Apple machine to help debug.
-if !Sys.iswindows() && !Sys.isapple()
+if !Sys.isapple()
     @testset "C token refresh, write" begin
         r = uuid4()
         c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=4, connect_timeout=2, read_idle_timeout=3)
