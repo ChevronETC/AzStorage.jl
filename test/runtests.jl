@@ -479,6 +479,27 @@ end
     @test x == "hello"
 end
 
+@testset "Object, putblock and putblocklist" begin
+    r = uuid4()
+    c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
+    io = robust_open(c, "bar")
+    x = rand(Float32, 100)
+    ids = blockids(3)
+    # blocks from views, uploaded out of order and concurrently
+    @sync for (i, range) in ((3, 81:100), (1, 1:40), (2, 41:80))
+        Threads.@spawn putblock(io, ids[i], view(x, range))
+    end
+    @test !isfile(io)
+    putblocklist(io, ids; contenttype="application/x-float32")
+    @test read!(io, zeros(Float32, 100)) == x
+    @test read!(io, zeros(Float32, 40); offset=40) == x[41:80]
+    r = HTTP.request("HEAD", "https://$(io.container.storageaccount).blob.core.windows.net/$(io.container.containername)/$(io.name)", ["Authorization" => "Bearer $(token(io.container.session))", "x-ms-version" => AzStorage.API_VERSION])
+    @test HTTP.header(r, "Content-Type") == "application/x-float32"
+    @test_throws ErrorException putblock(io, ids[1], view(x, 1:2:100))
+    @test_throws ErrorException putblock(io, ids[1], 1:10)
+    rm(c)
+end
+
 @testset "Object, isfile" begin
     r = uuid4()
     c = AzContainer("foo-$r-k", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)

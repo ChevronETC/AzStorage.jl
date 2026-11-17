@@ -401,6 +401,14 @@ function committed_blocklist(c, o)
     committedblocks
 end
 
+"""
+    putblocklist(container, "blobname", blockids; contenttype="application/octet-stream")
+    putblocklist(object::AzObject, blockids; contenttype="application/octet-stream")
+
+Commit the uncommitted blocks `blockids` (uploaded with `putblock`), in that order, as the content
+of the block blob "blobname", with the content type `contenttype`. The blob is created or replaced
+in a single step, so readers never see a partially written blob.
+"""
 function putblocklist(c, o, blockids; contenttype="application/octet-stream")
     xroot = XML.Element("BlockList")
     for blockid in blockids
@@ -442,6 +450,12 @@ function putblocklist(c, o, blockids; contenttype="application/octet-stream")
     nothing
 end
 
+"""
+    blockids(n)
+
+Return `n` block ids of equal length (all block ids of a blob must have the same length), for use
+with `putblock` and `putblocklist`.
+"""
 function blockids(_nblocks)
     l = ceil(Int, log10(_nblocks))
     [base64encode(lpad(blockid-1, l, '0')) for blockid in 1:_nblocks]
@@ -457,6 +471,41 @@ function writebytes_block(c, o, data, _blockids)
     (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
     authinfo!(c.session, _token, refresh_token, expiry)
 end
+
+"""
+    putblock(container, "blobname", blockid, data)
+    putblock(object::AzObject, blockid, data)
+
+Upload `data`, a contiguous array of isbits elements, as the uncommitted block `blockid` of the
+block blob "blobname". The blob does not change until its block list is committed with
+`putblocklist`, so blocks can be uploaded in any order and concurrently, for example from several
+threads. All block ids of a blob must have the same length; `blockids(n)` returns `n` such ids.
+A block holds at most 4000 MiB, and a blob at most 50,000 blocks.
+
+# Example
+```julia
+io = open(AzContainer("mycontainer"; storageaccount="mystorageaccount"), "foo.bin")
+ids = blockids(2)
+putblock(io, ids[2], rand(UInt8, 10))
+putblock(io, ids[1], rand(UInt8, 20))
+putblocklist(io, ids)
+```
+"""
+function putblock(c::AzContainer, o::AbstractString, blockid::AbstractString, data::AbstractArray{T}) where {T}
+    _iscontiguous(data) || error("AzStorage: `putblock` is not supported on non-isbits arrays and/or non-contiguous arrays")
+    token(c.session)
+    _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
+    # one block (nblocks=1), uploaded by one thread (nthreads=1)
+    # we are using the threaded API instead of the single threaded curl_writebytes_block_retry because the single threaded API requires a lock in the parameters
+    r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
+        clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, [HTTP.escapeuri(blockid)]::Ptr{Cstring}, data::Ptr{UInt8},
+        (length(data)*sizeof(T))::Csize_t, 1::Cint, 1::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, max(c.read_idle_timeout, c.write_idle_timeout)::Clong)::ResponseCodes
+    (r.http >= 300 || r.curl > 0) && error("putblock error: http code $(r.http), curl code $(r.curl)")
+    authinfo!(c.session, _token, refresh_token, expiry)
+    nothing
+end
+putblock(o::AzObject, blockid, data) = putblock(o.container, o.name, blockid, data)
+putblocklist(o::AzObject, blockids; contenttype="application/octet-stream") = putblocklist(o.container, o.name, blockids; contenttype)
 
 function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; contenttype="application/octet-stream")
     _blockids = blockids(nblocks(c.nthreads, length(data)))
@@ -1602,6 +1651,6 @@ Returns the access tier for a blob `o::AzObject`.
 """
 tier(o::AzObject) = tier(o.container, o.name)
 
-export AzContainer, containers, max_concurrent_io_workers, metadata, readdlm, status, tier, tier!, writedlm
+export AzContainer, blockids, containers, max_concurrent_io_workers, metadata, putblock, putblocklist, readdlm, status, tier, tier!, writedlm
 
 end
