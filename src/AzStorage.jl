@@ -402,12 +402,12 @@ function committed_blocklist(c, o)
 end
 
 """
-    putblocklist(container, "blobname", blockids)
-    putblocklist(object::AzObject, blockids)
+    putblocklist(container, "blobname", blockids; contenttype="application/octet-stream")
+    putblocklist(object::AzObject, blockids; contenttype="application/octet-stream")
 
 Commit the uncommitted blocks `blockids` (uploaded with `putblock`), in that order, as the content
-of the block blob "blobname". The blob is created or replaced in a single step, so readers never
-see a partially written blob.
+of the block blob "blobname", with the content type `contenttype`. The blob is created or replaced
+in a single step, so readers never see a partially written blob.
 """
 function putblocklist(c, o, blockids; contenttype="application/octet-stream")
     xroot = XML.Element("BlockList")
@@ -504,7 +504,7 @@ function putblock(c::AzContainer, o::AbstractString, blockid::AbstractString, da
     nothing
 end
 putblock(o::AzObject, blockid, data) = putblock(o.container, o.name, blockid, data)
-putblocklist(o::AzObject, blockids) = putblocklist(o.container, o.name, blockids)
+putblocklist(o::AzObject, blockids; contenttype="application/octet-stream") = putblocklist(o.container, o.name, blockids; contenttype)
 
 function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; contenttype="application/octet-stream")
     _blockids = blockids(nblocks(c.nthreads, length(data)))

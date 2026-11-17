@@ -490,9 +490,11 @@ end
         Threads.@spawn putblock(io, ids[i], view(x, range))
     end
     @test !isfile(io)
-    putblocklist(io, ids)
+    putblocklist(io, ids; contenttype="application/x-float32")
     @test read!(io, zeros(Float32, 100)) == x
     @test read!(io, zeros(Float32, 40); offset=40) == x[41:80]
+    r = HTTP.request("HEAD", "https://$(io.container.storageaccount).blob.core.windows.net/$(io.container.containername)/$(io.name)", ["Authorization" => "Bearer $(token(io.container.session))", "x-ms-version" => AzStorage.API_VERSION])
+    @test HTTP.header(r, "Content-Type") == "application/x-float32"
     @test_throws ErrorException putblock(io, ids[1], view(x, 1:2:100))
     @test_throws ErrorException putblock(io, ids[1], 1:10)
     rm(c)
