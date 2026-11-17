@@ -496,6 +496,7 @@ function putblock(c::AzContainer, o::AbstractString, blockid::AbstractString, da
     token(c.session)
     _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
     # one block (nblocks=1), uploaded by one thread (nthreads=1)
+    # we are using the threaded API instead of the single threaded curl_writebytes_block_retry because the single threaded API requires a lock in the parameters
     r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
         clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, [HTTP.escapeuri(blockid)]::Ptr{Cstring}, data::Ptr{UInt8},
         (length(data)*sizeof(T))::Csize_t, 1::Cint, 1::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, max(c.read_idle_timeout, c.write_idle_timeout)::Clong)::ResponseCodes
