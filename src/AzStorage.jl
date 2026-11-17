@@ -4,13 +4,14 @@ using AbstractStorage, AzSessions, AzStorage_jll, Base64, Dates, DelimitedFiles,
 
 # https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
 # https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/request-limits-and-throttling
-const RETRYABLE_HTTP_ERRORS = [
+# the retry codes are `Clong` because libAzStorage reads them as C `long`, which is 32 bits on Windows
+const RETRYABLE_HTTP_ERRORS = Clong[
     429, # Too many requests
     500, # Internal server error
     503] # Service unavailable
 
 # https://curl.haxx.se/libcurl/c/libcurl-errors.html
-const RETRYABLE_CURL_ERRORS = [
+const RETRYABLE_CURL_ERRORS = Clong[
     6,  # Couldn't resolve host. The given remote host was not resolved.
     7,  # Failed to connect() to host or proxy.
     28, # Connection timed out.
@@ -25,12 +26,7 @@ const API_VERSION = "2026-06-06"
 # buffer size for holding OAuth2 tokens
 const BUFFER_SIZE = unsafe_load(cglobal((:BUFFER_SIZE, libAzStorage), Int32))
 
-windows_one_thread(nthreads) = Sys.iswindows() ? 1 : nthreads
-
 function __init__()
-    if Sys.iswindows()
-        @warn "On Windows, AzStorage is limited to a single thread, meaning that performance may be degraded."
-    end
     @ccall libAzStorage.curl_init(length(RETRYABLE_HTTP_ERRORS)::Cint, length(RETRYABLE_CURL_ERRORS)::Cint, RETRYABLE_HTTP_ERRORS::Ptr{Clong}, RETRYABLE_CURL_ERRORS::Ptr{Clong}, API_VERSION::Cstring)::Cvoid
     resetperf_counters()
 end
@@ -158,7 +154,7 @@ function AzContainer(containername::AbstractString; storageaccount, session=AzSe
     prefix = strip(strip(prefix, '/')*'/'*join(name[2:end], '/'), '/')
 
     read_idle_timeout = read_timeout === nothing ? read_idle_timeout : read_timeout
-    AzContainer(String(storageaccount), String(_containername), String(prefix), session, windows_one_thread(nthreads), connect_timeout, read_idle_timeout, write_idle_timeout, nretry, verbose)
+    AzContainer(String(storageaccount), String(_containername), String(prefix), session, nthreads, connect_timeout, read_idle_timeout, write_idle_timeout, nretry, verbose)
 end
 
 function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSession(;lazy=false, scope=__OAUTH_SCOPE); nthreads=Sys.CPU_THREADS, connect_timeout=10, read_timeout=nothing, read_idle_timeout=30, write_idle_timeout=30, nretry=10, verbose=0)
@@ -168,7 +164,7 @@ function AbstractStorage.Container(::Type{<:AzContainer}, d::Dict, session=AzSes
         String(strip(d["containername"], '/')),
         String(strip(d["prefix"], '/')),
         session,
-        windows_one_thread(get(d, "nthreads", nthreads)),
+        get(d, "nthreads", nthreads),
         connect_timeout,
         read_idle_timeout,
         write_idle_timeout,
@@ -178,10 +174,11 @@ end
 
 Base.:(==)(x::AzContainer, y::AzContainer) = x.storageaccount == y.storageaccount && x.containername == y.containername && x.prefix == y.prefix
 
+# mirrors `struct ResponseCodes` in AzStorage.h, where `long` is 32 bits on Windows
 struct ResponseCodes
-    http::Int64
-    curl::Int64
-    retry_after::Int32
+    http::Clong
+    curl::Clong
+    retry_after::Cint
 end
 
 function isretryable(e::HTTP.StatusError)
@@ -250,7 +247,7 @@ end
 function authinfo(session::AzSessions.AzClientCredentialsSession)
     _token = new_pointer_array_from_string(session.token)
     refresh_token = C_NULL
-    expiry = [floor(UInt64, datetime2unix(session.expiry))]
+    expiry = [floor(Culong, datetime2unix(session.expiry))]
     scope = C_NULL
     resource = session.resource
     tenant = session.tenant
@@ -262,7 +259,7 @@ end
 function authinfo(session::Union{AzSessions.AzDeviceCodeFlowSession,AzSessions.AzAuthCodeFlowSession})
     _token = new_pointer_array_from_string(session.token)
     _refresh_token = new_pointer_array_from_string(session.refresh_token)
-    expiry = [floor(UInt64, datetime2unix(session.expiry))]
+    expiry = [floor(Culong, datetime2unix(session.expiry))]
     scope = session.scope
     resource = AzSessions.audience_from_scope(session.scope)
     tenant = session.tenant
@@ -273,7 +270,7 @@ end
 
 function authinfo(session::AzSessions.AzVMSession)
     refresh_token = C_NULL
-    expiry = [floor(UInt64, datetime2unix(session.expiry))]
+    expiry = [floor(Culong, datetime2unix(session.expiry))]
     scope = C_NULL
     resource = session.resource
     tenant = C_NULL
@@ -358,26 +355,6 @@ _normpath(s) = Sys.iswindows() ? replace(normpath(s), "\\"=>"/") : normpath(s)
 
 addprefix(c::AzContainer, o) = c.prefix == "" ? o : _normpath("$(c.prefix)/$o")
 
-function writebytes_blob(c, o, data, contenttype)
-    @retry c.nretry HTTP.request(
-        "PUT",
-        "https://$(c.storageaccount).blob.core.windows.net/$(c.containername)/$(addprefix(c,o))",
-        [
-            "Authorization" => "Bearer $(token(c.session))",
-            "x-ms-version" => API_VERSION,
-            "Content-Length" => "$(length(data))",
-            "Content-Type" => contenttype,
-            "x-ms-blob-type" => "BlockBlob"
-        ],
-        data;
-        retry = false,
-        verbose = c.verbose,
-        connect_timeout = c.connect_timeout,
-        read_idle_timeout = c.read_idle_timeout,
-        write_idle_timeout = c.write_idle_timeout)
-    nothing
-end
-
 # text of a leaf element like <Name>foo</Name>; "" for an empty element like <NextMarker/>
 _elementtext(node) = isempty(children(node)) ? "" : value(first(children(node)))
 
@@ -424,7 +401,7 @@ function committed_blocklist(c, o)
     committedblocks
 end
 
-function putblocklist(c, o, blockids)
+function putblocklist(c, o, blockids; contenttype="application/octet-stream")
     xroot = XML.Element("BlockList")
     for blockid in blockids
         push!(xroot, XML.Element("Uncommitted", blockid))
@@ -440,7 +417,8 @@ function putblocklist(c, o, blockids)
                 "x-ms-version" => API_VERSION,
                 "Authorization" => "Bearer $(token(c.session))",
                 "Content-Type" => "application/octet-stream",
-                "Content-Length" => "$(length(blocklist))"
+                "Content-Length" => "$(length(blocklist))",
+                "x-ms-blob-content-type" => contenttype
             ],
             blocklist;
             retry = false,
@@ -481,13 +459,9 @@ function writebytes_block(c, o, data, _blockids)
 end
 
 function writebytes(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; contenttype="application/octet-stream")
-    if Sys.iswindows()
-        writebytes_blob(c, o, data, contenttype)
-    else
-        _blockids = blockids(nblocks(c.nthreads, length(data)))
-        writebytes_block(c, o, data, _blockids)
-        putblocklist(c, o, _blockids)
-    end
+    _blockids = blockids(nblocks(c.nthreads, length(data)))
+    writebytes_block(c, o, data, _blockids)
+    putblocklist(c, o, _blockids; contenttype)
     nothing
 end
 
@@ -661,7 +635,7 @@ end
 
 nthreads_effective(nthreads::Integer, nbytes::Integer) = clamp(div(nbytes, _MINBYTES_PER_BLOCK), 1, nthreads)
 
-function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; offset=0, serial=Sys.iswindows())
+function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; offset=0, serial=false)
     function readbytes_serial!(c, o, data, offset)
         @retry c.nretry HTTP.open(
                 "GET",
@@ -720,9 +694,6 @@ data = read!(AzContainer("foo";storageaccount="bar"), "baz.bin", Vector{Float32}
 ```
 """
 function Base.read!(c::AzContainer, o::AbstractString, data::AbstractArray{T}; offset=0, serial=false) where {T}
-    if Sys.iswindows()
-        serial = true
-    end
     if _iscontiguous(data)
         _data = unsafe_wrap(Array, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false)
         readbytes!(c, o, _data; offset=offset*sizeof(T), serial)
@@ -813,61 +784,57 @@ function Base.cp(in::AbstractString, outc::AzContainer, outb::AbstractString; bu
         error("output container '$outc' does not exist. use `mkpath to create it.")
     end
 
-    if Sys.iswindows()
-        bytes = read!(in, Vector{UInt8}(undef, filesize(in)))
-        write(outc, outb, bytes)
-    else
-        n = filesize(in)
-        _buffersize = div(buffersize, 2)
-        _nblocks = nblocks(outc.nthreads, n, div(_buffersize, outc.nthreads))
-        _blockids = blockids(_nblocks)
-        nominal_bytes_per_block,remaining_bytes_per_block = divrem(n, _nblocks)
-        nblocks_per_buffer,remaining_blocks_per_buffer = divrem(_buffersize, nominal_bytes_per_block)
-        nblocks_per_buffer += remaining_blocks_per_buffer > 0 ? 1 : 0
+    n = filesize(in)
+    _buffersize = div(buffersize, 2)
+    _nblocks = nblocks(outc.nthreads, n, div(_buffersize, outc.nthreads))
+    _blockids = blockids(_nblocks)
+    nominal_bytes_per_block,remaining_bytes_per_block = divrem(n, _nblocks)
+    nblocks_per_buffer,remaining_blocks_per_buffer = divrem(_buffersize, nominal_bytes_per_block)
+    nblocks_per_buffer += remaining_blocks_per_buffer > 0 ? 1 : 0
 
-        buffer_read,buffer_write = ntuple(_->Vector{UInt8}(undef, nblocks_per_buffer*(nominal_bytes_per_block + 1)), 2)
+    buffer_read,buffer_write = ntuple(_->Vector{UInt8}(undef, nblocks_per_buffer*(nominal_bytes_per_block + 1)), 2)
 
-        tsk_write = @async nothing
-        i2byte = nbytes_buffer = 0
-        i1block = 1
-        io = open(in, "r")
-        iter = 1:_nblocks
-        speed_read,speed_write = 0.0,0.0
-        progress = Progress(length(iter); enabled=show_progress, desc="read/write = 0.00/0.00 MB/s")
-        for iblock = 1:_nblocks
-            i1byte = i2byte + 1
+    tsk_write = @async nothing
+    i2byte = nbytes_buffer = 0
+    i1block = 1
+    io = open(in, "r")
+    iter = 1:_nblocks
+    speed_read,speed_write = 0.0,0.0
+    progress = Progress(length(iter); enabled=show_progress, desc="read/write = 0.00/0.00 MB/s")
+    for iblock = 1:_nblocks
+        i1byte = i2byte + 1
 
-            if iblock <= remaining_bytes_per_block
-                i2byte = min(n, i1byte + nominal_bytes_per_block)
-            else
-                i2byte = min(n, i1byte + nominal_bytes_per_block - 1)
-            end
-
-            nbytes_buffer += i2byte - i1byte + 1
-
-            if iblock == _nblocks || nbytes_buffer >= _buffersize
-                _buffer_read = @view buffer_read[1:nbytes_buffer]
-                t_read = @elapsed read!(io, _buffer_read)
-                speed_read = (nbytes_buffer / 1_000_000) / t_read
-
-                wait(tsk_write)
-                buffer_read,buffer_write = buffer_write,buffer_read
-
-                nbytes_buffer_write,i1block_write,iblock_write = nbytes_buffer,i1block,iblock
-                _buffer_write = @view buffer_write[1:nbytes_buffer_write]
-                tsk_write = @async begin
-                    t_write = @elapsed writebytes_block(outc, outb, _buffer_write, _blockids[i1block_write:iblock_write])
-                    speed_write = (nbytes_buffer_write / 1_000_000) / t_write
-                end
-                i1block = iblock + 1
-                nbytes_buffer = 0
-            end
-            progress.core.desc = @sprintf "read/write = %.2f/%.2f MB/s" speed_read speed_write
-            ProgressMeter.next!(progress)
+        if iblock <= remaining_bytes_per_block
+            i2byte = min(n, i1byte + nominal_bytes_per_block)
+        else
+            i2byte = min(n, i1byte + nominal_bytes_per_block - 1)
         end
-        wait(tsk_write)
-        putblocklist(outc, outb, _blockids)
+
+        nbytes_buffer += i2byte - i1byte + 1
+
+        if iblock == _nblocks || nbytes_buffer >= _buffersize
+            _buffer_read = @view buffer_read[1:nbytes_buffer]
+            t_read = @elapsed read!(io, _buffer_read)
+            speed_read = (nbytes_buffer / 1_000_000) / t_read
+
+            wait(tsk_write)
+            buffer_read,buffer_write = buffer_write,buffer_read
+
+            nbytes_buffer_write,i1block_write,iblock_write = nbytes_buffer,i1block,iblock
+            _buffer_write = @view buffer_write[1:nbytes_buffer_write]
+            tsk_write = @async begin
+                t_write = @elapsed writebytes_block(outc, outb, _buffer_write, _blockids[i1block_write:iblock_write])
+                speed_write = (nbytes_buffer_write / 1_000_000) / t_write
+            end
+            i1block = iblock + 1
+            nbytes_buffer = 0
+        end
+        progress.core.desc = @sprintf "read/write = %.2f/%.2f MB/s" speed_read speed_write
+        ProgressMeter.next!(progress)
     end
+    close(io)
+    wait(tsk_write)
+    putblocklist(outc, outb, _blockids)
 end
 
 function Base.cp(inc::AzContainer, inb::AbstractString, out::AbstractString; buffersize=2_000_000_000, show_progress=false)

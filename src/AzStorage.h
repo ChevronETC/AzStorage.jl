@@ -2,6 +2,7 @@
 #define AZSTORAGE_H
 
 #include <curl/curl.h>
+#include <inttypes.h>
 #include <math.h>
 #include <omp.h>
 #include <stdio.h>

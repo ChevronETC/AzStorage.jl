@@ -112,7 +112,7 @@ curl_byterange(
         size_t  dataoffset,
         size_t  datasize)
 {
-    snprintf(byterange, BUFFER_SIZE, "Range: bytes=%ld-%ld", dataoffset, dataoffset+datasize-1);
+    snprintf(byterange, BUFFER_SIZE, "Range: bytes=%" PRIu64 "-%" PRIu64, (uint64_t)dataoffset, (uint64_t)(dataoffset+datasize-1));
 }
 
 void
@@ -120,7 +120,7 @@ curl_contentlength(
         size_t  datasize,
         char   *contentlength)
 {
-    snprintf(contentlength, BUFFER_SIZE, "Content-Length: %lu", (unsigned long)datasize);
+    snprintf(contentlength, BUFFER_SIZE, "Content-Length: %" PRIu64, (uint64_t)datasize);
 }
 
 size_t
@@ -321,7 +321,7 @@ curl_refresh_tokens_from_refresh_token(
     curl_easy_setopt(curlhandle, CURLOPT_URL, url);
     curl_easy_setopt(curlhandle, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curlhandle, CURLOPT_CUSTOMREQUEST, "POST");
-    curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDSIZE, strlen(body));
+    curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDSIZE, (long)strlen(body));
     curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDS, body);
     curl_easy_setopt(curlhandle, CURLOPT_SSL_VERIFYPEER, 0); /* TODO */
     curl_easy_setopt(curlhandle, CURLOPT_VERBOSE, verbose);
@@ -452,7 +452,7 @@ curl_refresh_tokens_from_client_credentials(
     curl_easy_setopt(curlhandle, CURLOPT_URL, url);
     curl_easy_setopt(curlhandle, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curlhandle, CURLOPT_CUSTOMREQUEST, "POST");
-    curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDSIZE, strlen(body));
+    curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDSIZE, (long)strlen(body));
     curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDS, body);
     curl_easy_setopt(curlhandle, CURLOPT_SSL_VERIFYPEER, 0); /* TODO */
     curl_easy_setopt(curlhandle, CURLOPT_VERBOSE, verbose);
@@ -660,7 +660,7 @@ curl_writebytes_block(
     curl_easy_setopt(curlhandle, CURLOPT_URL, url);
     curl_easy_setopt(curlhandle, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curlhandle, CURLOPT_CUSTOMREQUEST, "PUT");
-    curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDSIZE, datasize);
+    curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)datasize);
     curl_easy_setopt(curlhandle, CURLOPT_POSTFIELDS, data);
     curl_easy_setopt(curlhandle, CURLOPT_SSL_VERIFYPEER, 0); /* TODO */
     curl_easy_setopt(curlhandle, CURLOPT_VERBOSE, verbose);
