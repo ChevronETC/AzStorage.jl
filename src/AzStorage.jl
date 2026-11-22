@@ -698,7 +698,8 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
                 connect_timeout = c.connect_timeout,
                 read_idle_timeout = c.read_idle_timeout,
                 write_idle_timeout = c.write_idle_timeout) do io
-            read!(io, data)
+            # startread is needed to return a 404 if the file doesn't exist (specific to HTTP v2.*.*).
+            HTTP.startread(io).status < 300 && read!(io, data)
         end
         nothing
     end
