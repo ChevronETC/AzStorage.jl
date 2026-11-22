@@ -853,7 +853,8 @@ end
     r = uuid4()
     c = AzContainer("foo-$r-o", storageaccount=storageaccount, session=session, nthreads=2, nretry=10)
     mkpath(c)
-    @test_throws FileDoesNotExistError read!(c, "doesnotexist", Vector{UInt8}(undef, 10); serial)
+    # larger than the 404 response body, which must not be read as data
+    @test_throws FileDoesNotExistError read!(c, "doesnotexist", Vector{UInt8}(undef, 1000); serial)
     rm(c)
 end
 
