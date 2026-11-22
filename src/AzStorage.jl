@@ -699,7 +699,9 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
                 read_idle_timeout = c.read_idle_timeout,
                 write_idle_timeout = c.write_idle_timeout) do io
             # startread is needed to return a 404 if the file doesn't exist (specific to HTTP v2.*.*).
-            HTTP.startread(io).status < 300 && read!(io, data)
+            # the 404 status exception is raised after the do block executes.
+            ok = HTTP.startread(io).status < 300
+            ok ? read!(io, data) : read(io) # the `read(io)` when ok==false discards the error body so that the connection can be re-used
         end
         nothing
     end
