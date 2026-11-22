@@ -26,6 +26,11 @@ const API_VERSION = "2026-06-06"
 # buffer size for holding OAuth2 tokens
 const BUFFER_SIZE = unsafe_load(cglobal((:BUFFER_SIZE, libAzStorage), Int32))
 
+# libAzStorage never calls into Julia, so the GC can run while a thread waits on a transfer (`gc_safe` needs Julia ≥ 1.12)
+macro gcsafe_ccall(expr)
+    esc(VERSION >= v"1.12" ? :(@ccall gc_safe=true $expr) : :(@ccall $expr))
+end
+
 function __init__()
     @ccall libAzStorage.curl_init(length(RETRYABLE_HTTP_ERRORS)::Cint, length(RETRYABLE_CURL_ERRORS)::Cint, RETRYABLE_HTTP_ERRORS::Ptr{Clong}, RETRYABLE_CURL_ERRORS::Ptr{Clong}, API_VERSION::Cstring)::Cvoid
     resetperf_counters()
@@ -465,7 +470,7 @@ function writebytes_block(c, o, data, _blockids)
     __blockids = [HTTP.escapeuri(_blockid) for _blockid in _blockids]
     token(c.session)
     _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
-    r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
+    r = @gcsafe_ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
         clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, __blockids::Ptr{Cstring}, data::Ptr{UInt8},
         length(data)::Csize_t, c.nthreads::Cint, length(__blockids)::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, max(c.read_idle_timeout, c.write_idle_timeout)::Clong)::ResponseCodes
     (r.http >= 300 || r.curl > 0) && error("writebytes_block error: http code $(r.http), curl code $(r.curl)")
@@ -497,7 +502,7 @@ function putblock(c::AzContainer, o::AbstractString, blockid::AbstractString, da
     _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
     # one block (nblocks=1), uploaded by one thread (nthreads=1)
     # we are using the threaded API instead of the single threaded curl_writebytes_block_retry because the single threaded API requires a lock in the parameters
-    r = @ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
+    r = @gcsafe_ccall libAzStorage.curl_writebytes_block_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
         clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, [HTTP.escapeuri(blockid)]::Ptr{Cstring}, data::Ptr{UInt8},
         (length(data)*sizeof(T))::Csize_t, 1::Cint, 1::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, max(c.read_idle_timeout, c.write_idle_timeout)::Clong)::ResponseCodes
     (r.http >= 300 || r.curl > 0) && error("putblock error: http code $(r.http), curl code $(r.curl)")
@@ -535,7 +540,7 @@ Write the array `data` to a blob with the name `blobname` in `container::AzConta
 """
 function Base.write(c::AzContainer, o::AbstractString, data::AbstractArray{T}) where {T}
     if _iscontiguous(data)
-        writebytes(c, o, unsafe_wrap(Vector{UInt8}, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false); contenttype="application/octet-stream")
+        GC.@preserve data writebytes(c, o, unsafe_wrap(Vector{UInt8}, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false); contenttype="application/octet-stream")
     else
         error("AzStorage: `write` is not supported on non-isbits arrays and/or non-contiguous arrays")
     end
@@ -710,7 +715,7 @@ function readbytes!(c::AzContainer, o::AbstractString, data::DenseArray{UInt8}; 
         # heuristic to increase probability that token is valid during the retry logic in AzSessions.c
         t = token(c.session)
         _token,refresh_token,expiry,scope,resource,tenant,clientid,client_secret = authinfo(c.session)
-        r = @ccall libAzStorage.curl_readbytes_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
+        r = @gcsafe_ccall libAzStorage.curl_readbytes_retry_threaded(_token::Ptr{UInt8}, refresh_token::Ptr{UInt8}, expiry::Ptr{Culong}, scope::Cstring, resource::Cstring, tenant::Cstring,
             clientid::Cstring, client_secret::Cstring, c.storageaccount::Cstring, c.containername::Cstring, addprefix(c,o)::Cstring, data::Ptr{UInt8}, offset::Csize_t,
             length(data)::Csize_t, _nthreads::Cint, c.nretry::Cint, c.verbose::Cint, c.connect_timeout::Clong, max(c.read_idle_timeout, c.write_idle_timeout)::Clong)::ResponseCodes
         r.http == 404 && throw(FileDoesNotExistError())
@@ -748,7 +753,7 @@ data = read!(AzContainer("foo";storageaccount="bar"), "baz.bin", Vector{Float32}
 function Base.read!(c::AzContainer, o::AbstractString, data::AbstractArray{T}; offset=0, serial=false) where {T}
     if _iscontiguous(data)
         _data = unsafe_wrap(Array, convert(Ptr{UInt8}, pointer(data)), length(data)*sizeof(T), own=false)
-        readbytes!(c, o, _data; offset=offset*sizeof(T), serial)
+        GC.@preserve data readbytes!(c, o, _data; offset=offset*sizeof(T), serial)
     else
         error("AzStorage does not support reading objects of type $T and/or into a non-contiguous array.")
     end
